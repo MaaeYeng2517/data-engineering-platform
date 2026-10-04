@@ -1,0 +1,30 @@
+# Deployment scope for FastAPI Cloud: the API image only needs backend/ plus
+# the packaging metadata. Everything below is either served by another
+# container (frontend -> Vercel, Airflow, dbt, OpenMetadata, quality) or is
+# local-only state that would bloat the upload.
+frontend/
+tests/
+docs/
+dags/
+workers/
+quality/
+evaluation/
+notebooks/
+plugins/
+workflows/
+projects/
+models/
+data/
+logs/
+scripts/
+docker/
+config/
+.kilo/
+.vibe/
+.pytest_cache/
+.ruff_cache/
+*.md
+Makefile
+docker-compose.yml
+ruff.toml
+.env.example

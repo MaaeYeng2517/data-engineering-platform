@@ -1,0 +1,12 @@
+apache-airflow-providers-postgres==5.13.1
+apache-airflow-providers-http==4.13.2
+apache-airflow-providers-amazon==9.0.0
+apache-airflow-providers-ssh==3.14.0
+apache-airflow-providers-common-sql==1.19.0
+apache-airflow-providers-celery==3.8.3
+minio==7.2.7
+opentelemetry-api==1.27.0
+opentelemetry-sdk==1.27.0
+opentelemetry-exporter-otlp-proto-grpc==1.27.0
+great-expectations==0.18.15
+apache-airflow-providers-openlineage==1.13.0

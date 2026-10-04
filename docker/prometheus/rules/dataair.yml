@@ -1,0 +1,17 @@
+groups:
+  - name: dataair-recording
+    rules:
+      - record: job:dataair:etl_duration_seconds
+        expr: histogram_quantile(0.95, sum(rate(dbt_run_duration_seconds_bucket[5m])) by (le, model_name))
+        labels:
+          severity: warning
+
+      - record: job:dataair:etl_failures
+        expr: sum(increase(dbt_test_failures_total[1h])) by (model_name)
+        labels:
+          severity: critical
+
+      - record: job:dataair:freshness_lag_hours
+        expr: dbt_freshness_lag_hours
+        labels:
+          severity: warning

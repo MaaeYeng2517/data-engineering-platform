@@ -1,0 +1,773 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: dataair-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dataair}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dataair}
+      POSTGRES_DB: ${POSTGRES_DB:-dataair}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dataair} -d ${POSTGRES_DB:-dataair}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dataair-network
+    restart: unless-stopped
+
+  # PostgreSQL metrics for Prometheus
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.16.0
+    container_name: dataair-postgres-exporter
+    environment:
+      - DATA_SOURCE_NAME=postgresql://${POSTGRES_USER:-dataair}:${POSTGRES_PASSWORD:-dataair}@postgres:5432/${POSTGRES_DB:-dataair}?sslmode=disable
+      - PG_EXPORTER_AUTO_DISCOVER_DATABASES=true
+      - PG_EXPORTER_EXCLUDE_DATABASES=airflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - dataair-network
+    restart: unless-stopped
+
+  # Redis Cache & Queue
+  redis:
+    image: redis:7-alpine
+    container_name: dataair-redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dataair-network
+    restart: unless-stopped
+
+  # MinIO Object Storage
+  minio:
+    image: bitnamilegacy/minio:2025.7.23-debian-12-r5
+    container_name: dataair-minio
+    # the bitnami image runs as uid 1001, which cannot write to a fresh named volume
+    user: "0:0"
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - dataair-network
+    restart: unless-stopped
+
+  # Elasticsearch for Full-Text Search
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    container_name: dataair-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "${ELASTICSEARCH_PORT:-9200}:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - dataair-network
+    restart: unless-stopped
+
+  # Redis metrics for Prometheus
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.66.0
+    container_name: dataair-redis-exporter
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - dataair-network
+    restart: unless-stopped
+
+  # Airflow: one-shot database migration
+  airflow-init:
+    build:
+      context: .
+      dockerfile: docker/airflow/Dockerfile
+    image: dataair/airflow:2.10.3
+    container_name: dataair-airflow-init
+    command: ["db", "migrate"]
+    environment: &airflow_env
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-dataair}:${POSTGRES_PASSWORD:-dataair}@postgres:5432/airflow
+      AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_SIZE: 5
+      AIRFLOW__CORE__EXECUTOR: ${AIRFLOW_EXECUTOR:-LocalExecutor}
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__CORE__PLUGINS_FOLDER: /opt/airflow/plugins
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:-dataair-dev-airflow-secret-key-8f3a2c1e9b4d7f5a6e0d3c2b1a4f5e6d}
+      AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: 30
+      AIRFLOW__LOGGING__LOGGING_LEVEL: ${AIRFLOW_LOGGING_LEVEL:-INFO}
+      AIRFLOW__OPERATORS__DEFAULT_MAX_ACTIVE_TASKS_PER_DAG: 8
+      WAREHOUSE_URL: postgresql+psycopg2://${POSTGRES_USER:-dataair}:${POSTGRES_PASSWORD:-dataair}@postgres:5432/${POSTGRES_DB:-dataair}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-dataair}
+      OPENMETADATA_URL: http://openmetadata:8585
+      GE_HOME: /opt/airflow/quality/quality
+      DBT_BIN: /opt/dbt-venv/bin/dbt
+      DBT_PROJECT_DIR: /opt/airflow/dbt
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes: &airflow_volumes
+      - ./dags:/opt/airflow/dags:ro
+      - ./plugins:/opt/airflow/plugins:ro
+      - ./dbt:/opt/airflow/dbt
+      - ./quality:/opt/airflow/quality:ro
+      - ./config:/opt/airflow/config:ro
+      - ./data:/opt/airflow/data
+      - airflow_logs:/opt/airflow/logs
+    networks:
+      - dataair-network
+
+  # Airflow web UI and REST API
+  airflow-webserver:
+    build:
+      context: .
+      dockerfile: docker/airflow/Dockerfile
+    image: dataair/airflow:2.10.3
+    container_name: dataair-airflow-webserver
+    command: ["webserver"]
+    environment:
+      <<: *airflow_env
+      AIRFLOW__WEBSERVER__BASE_URL: ${AIRFLOW_BASE_URL:-http://localhost:8080}
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+      AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.session,airflow.api.auth.backend.basic_auth
+      AIRFLOW_CREATE_ADMIN: ${AIRFLOW_CREATE_ADMIN:-true}
+      AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER:-admin}
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-admin}
+      AIRFLOW_ADMIN_EMAIL: ${AIRFLOW_ADMIN_EMAIL:-admin@dataair.local}
+    ports:
+      - "${AIRFLOW_PORT:-8080}:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    volumes: *airflow_volumes
+    networks:
+      - dataair-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Airflow scheduler
+  airflow-scheduler:
+    build:
+      context: .
+      dockerfile: docker/airflow/Dockerfile
+    image: dataair/airflow:2.10.3
+    container_name: dataair-airflow-scheduler
+    command: ["scheduler"]
+    environment: *airflow_env
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    volumes: *airflow_volumes
+    networks:
+      - dataair-network
+    restart: unless-stopped
+
+  # Airflow triggerer for event-driven runs
+  airflow-triggerer:
+    build:
+      context: .
+      dockerfile: docker/airflow/Dockerfile
+    image: dataair/airflow:2.10.3
+    container_name: dataair-airflow-triggerer
+    command: ["triggerer"]
+    environment: *airflow_env
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    volumes: *airflow_volumes
+    networks:
+      - dataair-network
+    restart: unless-stopped
+
+  # Qdrant Vector Database
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: dataair-qdrant
+    volumes:
+      - qdrant_data:/qdrant/storage
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333 && printf 'GET /healthz HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '200' <&3"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - dataair-network
+    restart: unless-stopped
+
+  # Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: dataair-backend
+    environment:
+      - APP_ENV=${APP_ENV:-development}
+      - DEBUG=${DEBUG:-true}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-dataair}:${POSTGRES_PASSWORD:-dataair}@postgres:5432/${POSTGRES_DB:-dataair}
+      - DATABASE_ECHO=${DATABASE_ECHO:-false}
+      - DATABASE_POOL_SIZE=${DATABASE_POOL_SIZE:-20}
+      - DATABASE_MAX_OVERFLOW=${DATABASE_MAX_OVERFLOW:-10}
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_SECURE=${MINIO_SECURE:-false}
+      - MINIO_BUCKET=${MINIO_BUCKET:-dataair}
+      - AIRFLOW_URL=${AIRFLOW_URL:-http://airflow-webserver:8080}
+      - AIRFLOW_USERNAME=${AIRFLOW_ADMIN_USER:-admin}
+      - AIRFLOW_PASSWORD=${AIRFLOW_ADMIN_PASSWORD:-admin}
+      - OPENMETADATA_URL=${OPENMETADATA_URL:-http://openmetadata:8585}
+      - OPENMETADATA_USERNAME=${OPENMETADATA_ADMIN_EMAIL:-admin@dataair.local}
+      - OPENMETADATA_PASSWORD=${OPENMETADATA_ADMIN_PASSWORD:-admin}
+      - PROMETHEUS_URL=${PROMETHEUS_URL:-http://prometheus:9090}
+      - GRAFANA_URL=${GRAFANA_URL:-http://grafana:3000}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-dataair-backend}
+      - OTEL_SERVICE_NAMESPACE=${OTEL_SERVICE_NAMESPACE:-dataair}
+      - OTEL_SERVICE_VERSION=${OTEL_SERVICE_VERSION:-1.0.0}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - OTEL_EXPORTER_OTLP_PROTOCOL=${OTEL_EXPORTER_OTLP_PROTOCOL:-}
+      - OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS:-}
+      - OTEL_TRACES_SAMPLER_ARG=${OTEL_TRACES_SAMPLER_ARG:-1.0}
+      - AIRFLOW_PUBLIC_URL=${AIRFLOW_PUBLIC_URL:-http://localhost:8080}
+      - OPENMETADATA_PUBLIC_URL=${OPENMETADATA_PUBLIC_URL:-http://localhost:8585}
+      - PROMETHEUS_PUBLIC_URL=${PROMETHEUS_PUBLIC_URL:-http://localhost:9090}
+      - GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://localhost:3001}
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - QDRANT_URL=http://qdrant:6333
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-key-change-in-production-min-32-chars}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      - JWT_REFRESH_TOKEN_EXPIRE_DAYS=${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-30}
+      - CSRF_SECRET_KEY=${CSRF_SECRET_KEY:-dev-csrf-secret-change-in-production-min-32-chars}
+      - API_KEY_HMAC_SECRET=${API_KEY_HMAC_SECRET:-dev-api-secret-change-in-production-min-32-chars}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://localhost:3000}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
+      - COOKIE_SECURE=${COOKIE_SECURE:-false}
+      - COOKIE_SAMESITE=${COOKIE_SAMESITE:-lax}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.8-flash}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+      - LLM_PROVIDER=${LLM_PROVIDER:-}
+      - LLM_OFFLINE_FALLBACK=${LLM_OFFLINE_FALLBACK:-true}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o}
+      - LLM_EMBEDDING_MODEL=${LLM_EMBEDDING_MODEL:-text-embedding-3-small}
+      - CHAT_SYSTEM_PROMPT=${CHAT_SYSTEM_PROMPT:-}
+      - CHAT_TEMPERATURE=${CHAT_TEMPERATURE:-0.4}
+      - CHAT_MAX_TOKENS=${CHAT_MAX_TOKENS:-1024}
+      - CHAT_RATE_LIMIT_REQUESTS=${CHAT_RATE_LIMIT_REQUESTS:-20}
+      - CHAT_RATE_LIMIT_WINDOW_SECONDS=${CHAT_RATE_LIMIT_WINDOW_SECONDS:-60}
+      - ADMIN_EMAILS=${ADMIN_EMAILS:-admin@example.com}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app/backend:ro
+      # The image bakes the repo root, so `make test-backend` would otherwise run
+      # the test suite as it looked at build time. Mount the suite and its config
+      # so the container always exercises the current working tree.
+      - ./tests:/app/tests:ro
+      - ./pytest.ini:/app/pytest.ini:ro
+    networks:
+      - dataair-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend (Next.js)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: dataair-frontend
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+      - NEXT_PUBLIC_APP_NAME=DataAir
+      - NODE_ENV=${NODE_ENV:-development}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app/frontend:ro
+      - /app/frontend/node_modules
+      - /app/frontend/.next
+    networks:
+      - dataair-network
+    restart: unless-stopped
+    healthcheck:
+      # the alpine base image has no curl, only busybox wget
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Background Worker (Celery)
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.worker
+    container_name: dataair-worker
+    environment:
+      - APP_ENV=${APP_ENV:-development}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-dataair}:${POSTGRES_PASSWORD:-dataair}@postgres:5432/${POSTGRES_DB:-dataair}
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_SECURE=${MINIO_SECURE:-false}
+      - MINIO_BUCKET=${MINIO_BUCKET:-dataair}
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - QDRANT_URL=http://qdrant:6333
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o}
+      - LLM_EMBEDDING_MODEL=${LLM_EMBEDDING_MODEL:-text-embedding-3-small}
+      - OTEL_SERVICE_NAME=${OTEL_WORKER_SERVICE_NAME:-dataair-worker}
+      - OTEL_SERVICE_NAMESPACE=${OTEL_SERVICE_NAMESPACE:-dataair}
+      - OTEL_SERVICE_VERSION=${OTEL_SERVICE_VERSION:-1.0.0}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - OTEL_EXPORTER_OTLP_PROTOCOL=${OTEL_EXPORTER_OTLP_PROTOCOL:-}
+      - OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS:-}
+      - OTEL_TRACES_SAMPLER_ARG=${OTEL_TRACES_SAMPLER_ARG:-1.0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app/backend:ro
+    networks:
+      - dataair-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  # Celery Beat Scheduler
+  scheduler:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.scheduler
+    container_name: dataair-scheduler
+    environment:
+      - APP_ENV=${APP_ENV:-development}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-dataair}:${POSTGRES_PASSWORD:-dataair}@postgres:5432/${POSTGRES_DB:-dataair}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app/backend:ro
+    networks:
+      - dataair-network
+    restart: unless-stopped
+
+  # Python workspace (JupyterLab) for ad-hoc analysis
+  python:
+    build:
+      context: .
+      dockerfile: docker/tools/Dockerfile
+    image: dataair/tools:1.0
+    container_name: dataair-python
+    command: >
+      jupyter lab
+      --ip=0.0.0.0 --port=8888 --no-browser --allow-root
+      --ServerApp.token=${JUPYTER_TOKEN:-dataair}
+      --ServerApp.password=
+      --ServerApp.root_dir=/workspace
+    environment: &tools_env
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER:-dataair}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dataair}
+      POSTGRES_DB: ${POSTGRES_DB:-dataair}
+      WAREHOUSE_URL: postgresql+psycopg2://${POSTGRES_USER:-dataair}:${POSTGRES_PASSWORD:-dataair}@postgres:5432/${POSTGRES_DB:-dataair}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-dataair}
+      DBT_PROFILES_DIR: /usr/local/dbt
+      GE_HOME: /workspace/quality/quality
+    ports:
+      - "${JUPYTER_PORT:-8888}:8888"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes: &tools_volumes
+      - ./dbt:/usr/local/dbt
+      - ./quality:/workspace/quality:ro
+      - ./data:/workspace/data
+      - ./notebooks:/workspace/notebooks
+    networks:
+      - dataair-network
+    restart: unless-stopped
+
+  # dbt CLI runner
+  dbt:
+    build:
+      context: .
+      dockerfile: docker/tools/Dockerfile
+    image: dataair/tools:1.0
+    container_name: dataair-dbt
+    command: ["sleep", "infinity"]
+    environment: *tools_env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes: *tools_volumes
+    networks:
+      - dataair-network
+    profiles:
+      - tools
+
+  # Great Expectations runner
+  great-expectations:
+    build:
+      context: .
+      dockerfile: docker/tools/Dockerfile
+    image: dataair/tools:1.0
+    container_name: dataair-gx
+    command: ["sleep", "infinity"]
+    environment: *tools_env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes: *tools_volumes
+    networks:
+      - dataair-network
+    profiles:
+      - tools
+
+  # Flower (Celery Monitoring)
+  flower:
+    # must share the worker image so it can import backend.app.workers.celery_app
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.worker
+    container_name: dataair-flower
+    command: celery -A backend.app.workers.celery_app flower --port=5555 --broker=redis://redis:6379/0
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      # Lets monitoring read /api/workers and /api/tasks without an HTTP login.
+      - FLOWER_UNAUTHENTICATED_API=true
+    ports:
+      - "5555:5555"
+    volumes:
+      - ./backend:/app/backend:ro
+    depends_on:
+      - redis
+      - worker
+    networks:
+      - dataair-network
+    restart: unless-stopped
+
+  # Prometheus Metrics
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: dataair-prometheus
+    entrypoint: ["/bin/sh", "/etc/prometheus/entrypoint.sh"]
+    command: []
+    environment:
+      # Leave these empty to keep Prometheus local-only. When both are set and a
+      # push token is mounted, metrics are also shipped to Grafana Cloud.
+      - GRAFANA_CLOUD_REMOTE_WRITE_URL=${GRAFANA_CLOUD_REMOTE_WRITE_URL:-}
+      - GRAFANA_CLOUD_ORG_ID=${GRAFANA_CLOUD_ORG_ID:-}
+      - GRAFANA_CLOUD_PASSWORD_FILE=/etc/prometheus/secrets/grafana-cloud.password
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/prometheus/entrypoint.sh:/etc/prometheus/entrypoint.sh:ro
+      - ./docker/prometheus/secrets:/etc/prometheus/secrets:ro
+      - ./docker/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    networks:
+      - dataair-network
+    restart: unless-stopped
+
+  # Grafana Visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: dataair-grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./docker/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - dataair-network
+    restart: unless-stopped
+
+  # OpenMetadata: one-shot schema migration
+  openmetadata-init:
+    image: docker.getcollate.io/openmetadata/server:1.5.11
+    container_name: dataair-openmetadata-init
+    command: ["./bootstrap/openmetadata-ops.sh", "-d", "migrate", "--force"]
+    environment:
+      - SERVER_PORT=8585
+      - DB_DRIVER_CLASS=org.postgresql.Driver
+      - DB_SCHEME=postgresql
+      - DB_USE_SSL=false
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - OM_DATABASE=openmetadata_db
+      - DB_USER=${POSTGRES_USER:-dataair}
+      - DB_USER_PASSWORD=${POSTGRES_PASSWORD:-dataair}
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+      - ELASTICSEARCH_SCHEME=http
+      - ELASTICSEARCH_USERNAME=
+      - ELASTICSEARCH_PASSWORD=
+    depends_on:
+      postgres:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - dataair-network
+    restart: on-failure
+
+  # OpenMetadata: data catalog, lineage and glossary
+  openmetadata:
+    image: docker.getcollate.io/openmetadata/server:1.5.11
+    container_name: dataair-openmetadata
+    environment:
+      - SERVER_PORT=8585
+      - DB_DRIVER_CLASS=org.postgresql.Driver
+      - DB_SCHEME=postgresql
+      - DB_USE_SSL=false
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - OM_DATABASE=openmetadata_db
+      # 1.5.x reads DB_USER/DB_USER_PASSWORD; OM_USER/OM_PASSWORD are legacy
+      - DB_USER=${POSTGRES_USER:-dataair}
+      - DB_USER_PASSWORD=${POSTGRES_PASSWORD:-dataair}
+      - OM_USER=${POSTGRES_USER:-dataair}
+      - OM_PASSWORD=${POSTGRES_PASSWORD:-dataair}
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+      - ELASTICSEARCH_SCHEME=http
+      - ELASTICSEARCH_USERNAME=
+      - ELASTICSEARCH_PASSWORD=
+      - PIPELINE_SERVICE_CLIENT_ENDPOINT=http://openmetadata-ingestion:8080
+      - AIRFLOW_URI=http://airflow-webserver:8080
+      - KAFKA_BOOTSTRAP_SERVERS=
+      - SERVER_ADMIN_EMAIL=${OPENMETADATA_ADMIN_EMAIL:-admin@dataair.local}
+      - SERVER_ADMIN_PASSWORD=${OPENMETADATA_ADMIN_PASSWORD:-admin}
+      - SERVER_ADMIN_FIRSTNAME=DataAir
+      - SERVER_ADMIN_LASTNAME=Admin
+    volumes:
+      - openmetadata_data:/var/openmetadata/orm
+      - ./docker/openmetadata:/opt/openmetadata/configs:ro
+    ports:
+      - "${OPENMETADATA_PORT:-8585}:8585"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      openmetadata-init:
+        condition: service_completed_successfully
+    networks:
+      - dataair-network
+    restart: unless-stopped
+    healthcheck:
+      # the image ships no curl/wget binary, only the busybox applet
+      test: ["CMD-SHELL", "busybox wget -q -O - http://127.0.0.1:8585/api/v1/system/version || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+  # OpenMetadata ingestion workers
+  openmetadata-ingestion-init:
+    image: openmetadata/ingestion:1.5.11
+    container_name: dataair-openmetadata-ingestion-init
+    command: ["db", "migrate"]
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=${AIRFLOW_EXECUTOR:-LocalExecutor}
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER:-dataair}:${POSTGRES_PASSWORD:-dataair}@postgres:5432/airflow_om
+      # the image ships sample DAGs whose imports exceed the DagBag timeout,
+      # which makes db migrate fail
+      - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
+    volumes:
+      - ./docker/airflow/om-dags:/opt/airflow/dags:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - dataair-network
+    profiles:
+      - catalog
+
+  openmetadata-ingestion:
+    # the server image has no airflow binary; ingestion runs as Airflow DAGs inside
+    # this image (Airflow 2.9 + openmetadata_managed_apis plugin), so it runs a
+    # scheduler against its own metadata database
+    image: openmetadata/ingestion:1.5.11
+    container_name: dataair-openmetadata-ingestion
+    command: ["scheduler"]
+    environment:
+      - SERVER_PORT=8080
+      - SERVER_HOST=0.0.0.0
+      - AIRFLOW__CORE__EXECUTOR=${AIRFLOW_EXECUTOR:-LocalExecutor}
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER:-dataair}:${POSTGRES_PASSWORD:-dataair}@postgres:5432/airflow_om
+      - AIRFLOW__CORE__DAGS_FOLDER=/airflow/dags
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - OM_DATABASE=openmetadata_db
+      # 1.5.x reads DB_USER/DB_USER_PASSWORD; OM_USER/OM_PASSWORD are legacy
+      - DB_USER=${POSTGRES_USER:-dataair}
+      - DB_USER_PASSWORD=${POSTGRES_PASSWORD:-dataair}
+      - OM_USER=${POSTGRES_USER:-dataair}
+      - OM_PASSWORD=${POSTGRES_PASSWORD:-dataair}
+      - PIPELINE_SERVICE_CLIENT_ENDPOINT=http://openmetadata:8585/api
+      - AIRFLOW_URI=http://airflow-webserver:8080
+      - WAREHOUSE_HOST=postgres
+      - WAREHOUSE_PORT=5432
+      - WAREHOUSE_USER=${POSTGRES_USER:-dataair}
+      - WAREHOUSE_PASSWORD=${POSTGRES_PASSWORD:-dataair}
+      - WAREHOUSE_DATABASE=${POSTGRES_DB:-dataair}
+    volumes:
+      - ./docker/openmetadata:/opt/openmetadata/configs:ro
+      - ./docker/airflow/om-dags:/opt/airflow/dags:ro
+    depends_on:
+      openmetadata:
+        condition: service_started
+      airflow-webserver:
+        condition: service_started
+      openmetadata-ingestion-init:
+        condition: service_completed_successfully
+    networks:
+      - dataair-network
+    restart: unless-stopped
+    profiles:
+      - catalog
+
+  # Nginx Reverse Proxy (Production)
+  nginx:
+    image: nginx:alpine
+    container_name: dataair-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - backend
+      - frontend
+      - airflow-webserver
+      - openmetadata
+    networks:
+      - dataair-network
+    restart: unless-stopped
+    profiles:
+      - production
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  elasticsearch_data:
+  qdrant_data:
+  prometheus_data:
+  grafana_data:
+  openmetadata_data:
+  airflow_logs:
+
+networks:
+  dataair-network:
+    driver: bridge

@@ -1,0 +1,55 @@
+name: 'dataair_warehouse'
+version: '1.0.0'
+config-version: 2
+
+profile: 'dataair'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+vars:
+  start_date: '2024-01-01'
+  raw_schema: 'raw'
+  staging_schema: 'staging'
+  marts_schema: 'marts'
+  audit_schema: 'audit'
+
+models:
+  dataair_warehouse:
+    +persist_docs:
+      relation: true
+      columns: true
+    staging:
+      +materialized: view
+      +schema: staging
+      +tags: ['staging']
+    marts:
+      +materialized: table
+      +schema: marts
+      +tags: ['marts']
+
+seeds:
+  dataair_warehouse:
+    +schema: raw
+
+snapshots:
+  dataair_warehouse:
+    +target_schema: marts
+
+tests:
+  dataair_warehouse:
+    +store_failures: true
+    +schema: audit
+
+flags:
+  send_anonymous_usage_stats: false
+  use_colors: true

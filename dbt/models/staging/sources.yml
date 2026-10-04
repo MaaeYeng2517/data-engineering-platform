@@ -1,0 +1,33 @@
+version: 2
+
+sources:
+  - name: raw
+    description: Landing zone populated by the ingestion DAGs
+    schema: "{{ var('raw_schema') }}"
+    tables:
+      - name: sales
+        description: One row per completed order line
+        loaded_at_field: _ingested_at
+        freshness:
+          error_after: {count: 24, period: hour}
+        columns:
+          - name: order_id
+            tests: [not_null]
+          - name: order_date
+            tests: [not_null]
+          - name: amount
+            tests: [not_null]
+
+      - name: products
+        description: Product dimension as delivered by the source system
+        columns:
+          - name: product_id
+            tests: [not_null]
+          - name: product_name
+            tests: [not_null]
+
+      - name: customers
+        description: Customer dimension as delivered by the source system
+        columns:
+          - name: customer_id
+            tests: [not_null]

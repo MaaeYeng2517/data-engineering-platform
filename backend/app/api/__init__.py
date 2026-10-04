@@ -1,0 +1,38 @@
+"""API routers exposed by the application."""
+from backend.app.api import (
+    admin,
+    api_keys,
+    auth,
+    billing,
+    connectors,
+    contact,
+    documents,
+    evaluation,
+    governance,
+    knowledge_bases,
+    metadata,
+    rag,
+    search,
+    system,
+    tenants,
+    workflows,
+)
+
+__all__ = [
+    "admin",
+    "api_keys",
+    "auth",
+    "billing",
+    "connectors",
+    "contact",
+    "documents",
+    "evaluation",
+    "governance",
+    "knowledge_bases",
+    "metadata",
+    "rag",
+    "search",
+    "system",
+    "tenants",
+    "workflows",
+]

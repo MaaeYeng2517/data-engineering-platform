@@ -1,0 +1,76 @@
+workflows:
+  - name: sales_ingestion
+    description: Land sales/product files from MinIO into the raw schema, then transform with dbt.
+    bundleId: sales-pipeline
+    sourceConfig:
+      type: MINIO
+      containerName: dataair
+      serviceConnection:
+        configType: Minio
+        host: minio
+        port: 9000
+        accessKey: ${MINIO_ROOT_USER:-minioadmin}
+        secretKey: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      sourceType: FileMetadata
+    ingestionPipeline:
+      type: WORKFLOW
+      config:
+        lineage:
+          extractLineage: true
+        airFlow:
+          startDate: "2026-01-01T00:00:00.000Z"
+
+  - name: warehouse_postgres
+    description: Catalog the medallion warehouse tables and their dbt lineage.
+    bundleId: warehouse-postgres
+    sourceConfig:
+      type: POSTGRES
+      containerName: dataair
+      serviceConnection:
+        configType: Postgres
+        hostPort: postgres:5432
+        auth:
+          type: basic
+          config:
+            username: ${POSTGRES_USER:-dataair}
+            password: ${POSTGRES_PASSWORD:-dataair}
+        database: ${POSTGRES_DB:-dataair}
+      sourceType: DatabaseLineage
+      lineageConfiguration:
+        databaseServiceName: warehouse_postgres
+        schema: marts
+        includeTables: "true"
+    ingestionPipeline:
+      type: WORKFLOW
+      config:
+        lineage:
+          extractLineage: true
+        airFlow:
+          startDate: "2026-01-01T00:00:00.000Z"
+
+  - name: dbt_manifest
+    description: Read dbt manifest.json to publish models, tests and column lineage.
+    bundleId: dbt-catalog
+    sourceConfig:
+      type: DBT
+      containerName: dataair
+      serviceConnection:
+        configType: Dbt
+        hostPort: airflow-webserver:8080
+        connection:
+          type: http
+          config:
+            type: ApiToken
+            apiToken: ${DBT_CATALOG_TOKEN:-}
+            headers:
+              - name: Authorization
+                value: Bearer ${DBT_CATALOG_TOKEN:-}
+        sourceType: JsonManifest
+        manifestPath: /airflow/dbt/target/manifest.json
+    ingestionPipeline:
+      type: WORKFLOW
+      config:
+        lineage:
+          extractLineage: true
+        airFlow:
+          startDate: "2026-01-01T00:00:00.000Z"

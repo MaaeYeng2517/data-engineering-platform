@@ -1,0 +1,25 @@
+# Lint rules for the DataAir backend.
+#
+# The selection stays close to ruff's own defaults (pycodestyle errors, pyflakes)
+# so a clean run means "no real defects", not "no style opinions". RUF013 in
+# particular is left off: the codebase annotates optional parameters implicitly
+# and changing 28 signatures would be churn with no behavioural gain.
+[lint]
+select = [
+  "E4",   # pycodestyle: imports
+  "E7",   # pycodestyle: statements
+  "E9",   # pycodestyle: runtime errors
+  "F",    # pyflakes
+]
+
+[lint.per-file-ignores]
+# Importing every model registers its tables on `Base.metadata`, which is what
+# `init_db` creates. The imports are side effects, not dead code, and they have
+# to come after `Base` is declared.
+"backend/database.py" = ["F401", "E402"]
+# Module docstring + re-export surface for the package.
+"backend/app/schemas/__init__.py" = ["F401"]
+"backend/app/services/*/__init__.py" = ["F401"]
+
+[lint.isort]
+known-first-party = ["backend", "tests"]

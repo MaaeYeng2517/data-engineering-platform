@@ -1,0 +1,27 @@
+name: sales_checkpoint
+config_version: 3.0
+datasource_name: dataair
+data_connector_name: warehouse
+validations:
+  - batch_request:
+      datasource_name: dataair
+      data_connector_name: warehouse
+      data_asset_name: marts.sales_daily
+    expectation_suite_name: sales_suite
+evaluation_parameters:
+  include_rendered_content: true
+  include_config: true
+runtime_configuration:
+  variables:
+    run_id: null
+notifications:
+  - name: slack
+    type: slack
+    config:
+      api_url:
+        data_secret_name: slack_webhook_url
+  - name: teams
+    type: microsoft-teams
+    config:
+      webhook_url:
+        data_secret_name: teams_webhook_url

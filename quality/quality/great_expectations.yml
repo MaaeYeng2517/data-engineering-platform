@@ -1,0 +1,39 @@
+"""Great Expectations 0.18 style quality context for the DataAir warehouse."""
+
+import os
+
+import great_expectations as ge
+
+PG_HOST = os.environ.get("POSTGRES_HOST", "postgres")
+PG_PORT = os.environ.get("POSTGRES_PORT", "5432")
+PG_USER = os.environ.get("POSTGRES_USER", "dataair")
+PG_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "dataair")
+PG_DB = os.environ.get("POSTGRES_DB", "dataair")
+
+PG_DSN = f"postgresql+psycopg2://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/{PG_DB}"
+
+MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "minio:9000")
+MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
+MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
+
+data_context = ge.get_context(project_root_dir="/opt/airflow/quality/quality")
+
+datasource_config = {
+    "name": "dataair",
+    "class_name": "Datasource",
+    "module_name": "great_expectations.datasource",
+    "execution_engine": {
+        "class_name": "SqlAlchemyExecutionEngine",
+        "module_name": "great_expectations.execution_engine",
+        "create_temp_table": False,
+        "connection_string": PG_DSN,
+    },
+    "data_connectors": {
+        "warehouse": {
+            "class_name": "SimpleSqlalchemyDataConnector",
+            "module_name": "great_expectations.datasource.data_connector",
+        }
+    },
+}
+
+data_context.add_or_update_datasource(**datasource_config)
