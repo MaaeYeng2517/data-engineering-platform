@@ -1,6 +1,8 @@
 """Main FastAPI application."""
 import logging
+import time
 from contextlib import asynccontextmanager
+from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,8 +34,10 @@ from backend.app.api import (
     workflows,
 )
 from backend.app.dependencies import require_platform_user
+from backend.app.models.api_key import ApiUsageLog
 from backend.app.observability import configure_telemetry, shutdown_telemetry
 from backend.app.security import CSRF_COOKIE_NAME, verify_csrf_token
+from backend.app.services.indexing.pipeline import rehydrate_index
 from backend.config import (
     ALLOWED_ORIGINS,
     APP_NAME,
@@ -47,7 +51,12 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await init_db()
+    async with async_session_factory() as db:
+        await init_db()
+        # The search index is per-process state; rebuild it from the stored
+        # chunks so a restart does not serve an empty index.
+        indexed = await rehydrate_index(db)
+
     validate_production_config()
 
     from backend.app.api.billing import seed_default_plans
@@ -57,7 +66,7 @@ async def lifespan(app: FastAPI):
         tenants = (await db.execute(select(Tenant).where(Tenant.is_active.is_(True)))).scalars().all()
         for tenant in tenants:
             await seed_default_plans(db, tenant.id)
-    logger.info("Database initialized")
+    logger.info("Database initialized, %d chunks rehydrated into the index", indexed)
     try:
         yield
     finally:
@@ -85,6 +94,42 @@ configure_telemetry(app, engine=engine)
 
 
 @app.middleware("http")
+async def api_usage_middleware(request: Request, call_next):
+    """Record one usage row per API-key request.
+
+    Only key-authenticated calls are logged: browser sessions are already
+    visible in the access logs, and logging every page view would drown the
+    per-key usage the `/api-keys/usage` endpoints report.
+    """
+    started = time.perf_counter()
+    response = await call_next(request)
+
+    api_key_id = getattr(request.state, "api_key_id", None)
+    user_id = getattr(request.state, "user_id", None)
+    if api_key_id and user_id:
+        try:
+            async with async_session_factory() as db:
+                db.add(
+                    ApiUsageLog(
+                        api_key_id=UUID(api_key_id),
+                        user_id=UUID(user_id),
+                        tenant_id=UUID(request.state.tenant_id),
+                        endpoint=request.url.path,
+                        method=request.method,
+                        status_code=response.status_code,
+                        latency_ms=int((time.perf_counter() - started) * 1000),
+                        ip_address=request.client.host if request.client else None,
+                        user_agent=request.headers.get("user-agent"),
+                    )
+                )
+                await db.commit()
+        except Exception as exc:  # pragma: no cover - logging must not fail a request
+            logger.warning("Could not record API usage: %s", exc)
+
+    return response
+
+
+@app.middleware("http")
 async def csrf_middleware(request: Request, call_next):
     unsafe = request.method in {"POST", "PUT", "PATCH", "DELETE"}
     public_paths = (
@@ -99,6 +144,7 @@ async def csrf_middleware(request: Request, call_next):
         # Chat is a stateless, rate-limited public endpoint with no cookie-driven
         # side effects, so it is reachable before a CSRF token exists.
         "/api/v1/chat",
+        "/api/v1/connectors/test",
     )
     if unsafe and not request.url.path.startswith(public_paths):
         has_api_key = bool(request.headers.get("x-api-key"))
@@ -162,6 +208,7 @@ app.include_router(metadata.router, prefix="/api/v1/metadata", tags=["Metadata"]
 app.include_router(evaluation.router, prefix="/api/v1/evaluation", tags=["Evaluation"], dependencies=[Depends(require_platform_user)])
 app.include_router(governance.router, prefix="/api/v1/governance", tags=["Governance"], dependencies=[Depends(require_platform_user)])
 app.include_router(connectors.router, prefix="/api/v1/connectors", tags=["Connectors"], dependencies=[Depends(require_platform_user)])
+app.include_router(connectors.public_router, prefix="/api/v1/connectors", tags=["Connectors"])
 app.include_router(profiles.router, prefix="/api/v1/profiles", tags=["Profiles"], dependencies=[Depends(require_platform_user)])
 app.include_router(platform.router, prefix="/api/v1", tags=["Platform"], dependencies=[Depends(require_platform_user)])
 app.include_router(system.router, prefix="/api/v1", tags=["System"])

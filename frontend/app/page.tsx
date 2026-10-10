@@ -11,6 +11,7 @@ import {
   PlatformSection,
   PricingSection,
   ProcessingSection,
+  StatsSection,
 } from '@/components/marketing/sections'
 
 export const metadata: Metadata = {
@@ -50,6 +51,7 @@ export default function HomePage() {
         <Hero />
         <ChatSection />
         <PlatformSection />
+        <StatsSection />
         <PagesSection />
         <ProcessingSection />
         <ArchitectureSection />

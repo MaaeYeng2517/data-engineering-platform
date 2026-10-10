@@ -51,7 +51,7 @@ class _SessionContext:
 @pytest.fixture
 def startup_calls(monkeypatch):
     """Patch every side effect the startup hook performs."""
-    calls = {"init_db": 0, "validate": 0}
+    calls = {"init_db": 0, "validate": 0, "rehydrate": 0}
     session = _Session()
     monkeypatch.setattr(session, "executed", session.executed)
 
@@ -61,8 +61,13 @@ def startup_calls(monkeypatch):
     def fake_validate():
         calls["validate"] += 1
 
+    async def fake_rehydrate(db):
+        calls["rehydrate"] += 1
+        return 0
+
     monkeypatch.setattr(main_module, "init_db", fake_init_db)
     monkeypatch.setattr(main_module, "validate_production_config", fake_validate)
+    monkeypatch.setattr(main_module, "rehydrate_index", fake_rehydrate)
     monkeypatch.setattr(main_module, "async_session_factory", lambda: _SessionContext(session))
     return calls, session
 
@@ -79,6 +84,9 @@ async def test_lifespan_initialises_the_database(startup_calls):
 
     assert calls["init_db"] == 1
     assert calls["validate"] == 1
+    # The search index is per-process state, so it is rebuilt from the stored
+    # chunks on every start.
+    assert calls["rehydrate"] == 1
     # Active tenants are enumerated so their default plans can be seeded.
     assert session.executed == 1
 

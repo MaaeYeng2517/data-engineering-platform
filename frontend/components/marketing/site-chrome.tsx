@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 
 const navLinks = [
   { title: 'Documents', href: '/documents' },
-  { title: 'Ask AI', href: '/#chat' },
+  { title: 'AI Agent Chat', href: '/#chat' },
   { title: 'Platform', href: '/#platform' },
   { title: 'Capabilities', href: '/#capabilities' },
   { title: 'Workspace', href: '/#pages' },

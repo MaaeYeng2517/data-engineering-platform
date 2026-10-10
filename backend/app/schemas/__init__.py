@@ -325,6 +325,7 @@ class DocumentCreate(BaseModel):
     title: str
     source_type: str
     source_url: Optional[str] = None
+    content: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -340,6 +341,10 @@ class DocumentResponse(BaseModel):
     version: str
     is_published: bool
     created_at: datetime
+    updated_at: Optional[datetime] = None
+    file_size: Optional[int] = None
+    mime_type: Optional[str] = None
+    checksum: Optional[str] = None
 
 
 class ChunkResponse(BaseModel):

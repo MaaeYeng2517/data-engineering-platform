@@ -24,33 +24,42 @@ class MetadataEngine:
         return self.schemas.get(schema_id)
     
     def validate(self, schema_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate data against schema"""
+        """Validate data against a registered schema"""
         schema = self.schemas.get(schema_id)
         if not schema:
             return {"valid": False, "error": "Schema not found"}
-        
+        return self.validate_fields(schema.get("fields", []), data)
+
+    @staticmethod
+    def validate_fields(fields: List[Dict[str, Any]], data: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate data against a field definition list.
+
+        Split out from `validate` so a schema loaded from Postgres can be
+        checked without being registered in this process.
+        """
         errors = []
-        for field in schema.get("fields", []):
-            field_name = field["name"]
-            required = field.get("required", False)
-            
-            if required and field_name not in data:
+        for field in fields:
+            field_name = field.get("name")
+            if not field_name:
+                continue
+
+            if field.get("required", False) and field_name not in data:
                 errors.append(f"Missing required field: {field_name}")
-            
+
             if field_name in data:
                 value = data[field_name]
                 field_type = field.get("type", "string")
-                
+
                 # Type validation
                 if field_type == "integer" and not isinstance(value, int):
                     errors.append(f"Field {field_name} must be integer")
                 elif field_type == "string" and not isinstance(value, str):
                     errors.append(f"Field {field_name} must be string")
-        
+
         return {
             "valid": len(errors) == 0,
             "errors": errors,
-            "validated_at": utcnow().isoformat()
+            "validated_at": utcnow().isoformat(),
         }
     
     def add_tags(self, data: Dict[str, Any], tags: List[str]) -> Dict[str, Any]:

@@ -1,5 +1,8 @@
+'use client'
+
 import Link from 'next/link'
 import {
+  Activity,
   ArrowRight,
   BarChart3,
   BookOpen,
@@ -17,8 +20,20 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Users,
   Workflow,
 } from 'lucide-react'
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -146,7 +161,7 @@ const pages = [
 const processing = [
   {
     step: '01',
-    title: 'Extract',
+    title: 'Data Extract',
     description:
       'Pull raw text out of PDFs, HTML and uploaded files, then normalise whitespace and encoding.',
     icon: FileText,
@@ -154,7 +169,7 @@ const processing = [
   },
   {
     step: '02',
-    title: 'Clean',
+    title: 'Data Clean',
     description:
       'Strip markup and boilerplate so downstream chunks carry signal rather than layout noise.',
     icon: Filter,
@@ -162,7 +177,7 @@ const processing = [
   },
   {
     step: '03',
-    title: 'Chunk',
+    title: 'Data Chunk',
     description:
       'Split long text into overlapping token windows so a single answer never depends on one huge block.',
     icon: Scissors,
@@ -170,7 +185,7 @@ const processing = [
   },
   {
     step: '04',
-    title: 'Embed',
+    title: 'Data Embed',
     description:
       'Turn each chunk into a normalised vector, using your configured provider or the offline fallback.',
     icon: Sparkles,
@@ -178,7 +193,7 @@ const processing = [
   },
   {
     step: '05',
-    title: 'Index',
+    title: 'Data Index',
     description:
       'Store chunks across the keyword, vector and graph indexes so hybrid retrieval can combine them.',
     icon: Layers,
@@ -269,6 +284,175 @@ export function Hero() {
         <p className="text-xs text-muted-foreground">
           No credit card required &middot; Free plan available
         </p>
+      </div>
+    </section>
+  )
+}
+
+const stats = [
+  {
+    value: 6,
+    label: 'Platform users',
+    description: 'Accounts registered on the platform',
+    icon: Users,
+    color: '#6366f1',
+  },
+  {
+    value: 9,
+    label: 'Active tenants',
+    description: 'Workspaces running on the platform',
+    icon: ShieldCheck,
+    color: '#8b5cf6',
+  },
+  {
+    value: 1.64,
+    label: 'Total revenue (฿M)',
+    description: 'Revenue processed across all sales',
+    icon: CircleDollarSign,
+    color: '#10b981',
+  },
+  {
+    value: 100,
+    label: 'Availability (%)',
+    description: 'Stack uptime across all services',
+    icon: Activity,
+    color: '#06b6d4',
+  },
+  {
+    value: 28,
+    label: 'Warehouse tables',
+    description: 'Tables across raw, staging, marts and audit',
+    icon: Database,
+    color: '#f59e0b',
+  },
+]
+
+const chartData = stats.map((s) => ({
+  name: s.label.split(' ')[0],
+  value: s.value,
+  fill: s.color,
+}))
+
+function StatTooltip({ active, payload }: any) {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload
+    return (
+      <div className="rounded-lg border bg-background p-3 shadow-lg">
+        <p className="text-sm font-semibold">{data.name}</p>
+        <p className="text-sm text-muted-foreground">
+          {data.value >= 1000 ? data.value.toLocaleString() : data.value}
+          {' '}
+          {stats.find((s) => s.label.startsWith(data.name))?.label.split(' ').slice(1).join(' ')}
+        </p>
+      </div>
+    )
+  }
+  return null
+}
+
+export function StatsSection() {
+  return (
+    <section id="stats" className="scroll-mt-16 border-b bg-muted/30 py-20">
+      <div className="container">
+        <div className="mx-auto max-w-2xl text-center">
+          <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
+            Trusted by data teams worldwide
+          </h2>
+          <p className="mt-3 text-muted-foreground">
+            Real numbers from teams running production data lifecycles.
+          </p>
+        </div>
+        <div className="mt-12 grid gap-8 lg:grid-cols-5">
+          <div className="lg:col-span-2">
+            <div className="flex h-full flex-col">
+              <h3 className="mb-4 text-lg font-semibold">Platform at a glance</h3>
+              <div className="grid grid-cols-2 gap-3">
+                {stats.map((stat) => {
+                  const Icon = stat.icon
+                  return (
+                    <div
+                      key={stat.label}
+                      className="flex items-center gap-3 rounded-lg border bg-background p-3"
+                    >
+                      <div
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+                        style={{ backgroundColor: `${stat.color}20` }}
+                      >
+                        <Icon className="h-4 w-4" style={{ color: stat.color }} />
+                      </div>
+                      <div className="min-w-0">
+                        <div
+                          className="text-lg font-bold"
+                          style={{ color: stat.color }}
+                        >
+                          {stat.value >= 1000
+                            ? stat.value.toLocaleString()
+                            : stat.value}
+                        </div>
+                        <div className="truncate text-xs text-muted-foreground">
+                          {stat.label.split(' ')[0]}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+          <div className="lg:col-span-3">
+            <Card className="h-full">
+              <CardHeader>
+                <CardTitle className="text-base">Key metrics</CardTitle>
+                <CardDescription>Comparative snapshot of platform adoption</CardDescription>
+              </CardHeader>
+              <CardContent className="h-[320px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={chartData}
+                    layout="vertical"
+                    margin={{ top: 8, right: 24, bottom: 8, left: 8 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                    <XAxis
+                      type="number"
+                      tick={{ fontSize: 11 }}
+                      tickFormatter={(v) =>
+                        v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v
+                      }
+                    />
+                    <YAxis
+                      type="category"
+                      dataKey="name"
+                      tick={{ fontSize: 12 }}
+                      width={80}
+                    />
+                    <Tooltip content={<StatTooltip />} />
+                    <Bar
+                      dataKey="value"
+                      radius={[0, 6, 6, 0]}
+                      animationDuration={1200}
+                    >
+                      {chartData.map((entry, idx) => (
+                        <Cell key={entry.name} fill={entry.fill} />
+                      ))}
+                    </Bar>
+                    <ReferenceLine
+                      x={1000}
+                      stroke="#ef4444"
+                      strokeDasharray="4 4"
+                      label={{
+                        value: 'Target',
+                        position: 'insideBottomRight',
+                        fill: '#ef4444',
+                        fontSize: 11,
+                      }}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
       </div>
     </section>
   )

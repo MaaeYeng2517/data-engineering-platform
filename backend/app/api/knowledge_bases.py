@@ -1,19 +1,28 @@
 """Knowledge Bases API endpoints"""
 import re
-import uuid
-from typing import List
+from typing import List, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.utils.time import utcnow
 from backend.app.dependencies import get_current_user
+from backend.app.models.chunk import Chunk
+from backend.app.models.document import Document
+from backend.app.models.knowledge_base import KnowledgeBase
 from backend.app.models.user import User
 from backend.app.schemas import KnowledgeBaseCreate, KnowledgeBaseResponse
+from backend.app.services.indexing import hybrid_index
+from backend.database import get_db
 
 router = APIRouter()
 
-# In-memory storage
-_kbs = {}
+# Knowledge base lifecycle: draft while it is being filled, published once its
+# documents are searchable, archived when it is retired but kept.
+STATUS_DRAFT = "draft"
+STATUS_PUBLISHED = "published"
+STATUS_ARCHIVED = "archived"
 
 
 def _slugify(value: str) -> str:
@@ -21,92 +30,183 @@ def _slugify(value: str) -> str:
     return slug or "knowledge-base"
 
 
+async def _get_scoped(db: AsyncSession, kb_id: UUID, user: User) -> KnowledgeBase:
+    """Return the knowledge base only if it belongs to the caller's workspace."""
+    result = await db.execute(
+        select(KnowledgeBase).where(
+            KnowledgeBase.id == kb_id,
+            KnowledgeBase.tenant_id == user.tenant_id,
+        )
+    )
+    record = result.scalar_one_or_none()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    return record
+
+
 @router.post("/", response_model=KnowledgeBaseResponse)
 async def create_kb(
     kb: KnowledgeBaseCreate,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Create a new knowledge base owned by the calling user."""
-    kb_id = str(uuid.uuid4())
+    slug = kb.slug or _slugify(kb.name)
 
-    new_kb = {
-        "id": kb_id,
-        "tenant_id": str(user.tenant_id),
-        "owner_id": str(user.id),
-        "name": kb.name,
-        "description": kb.description,
-        "slug": kb.slug or _slugify(kb.name),
-        "settings": kb.settings,
-        "is_published": False,
-        "status": "draft",
-        "version": "1.0",
-        "created_at": utcnow(),
-        "updated_at": utcnow(),
-    }
+    existing = await db.execute(
+        select(func.count())
+        .select_from(KnowledgeBase)
+        .where(
+            KnowledgeBase.tenant_id == user.tenant_id,
+            KnowledgeBase.slug == slug,
+        )
+    )
+    if existing.scalar_one():
+        raise HTTPException(status_code=409, detail="A knowledge base with that slug already exists")
 
-    _kbs[kb_id] = new_kb
-    return new_kb
+    record = KnowledgeBase(
+        tenant_id=user.tenant_id,
+        owner_id=user.id,
+        name=kb.name,
+        description=kb.description,
+        slug=slug,
+        settings=kb.settings or {},
+        status=STATUS_DRAFT,
+    )
+    db.add(record)
+    await db.commit()
+    await db.refresh(record)
+    return record
 
 
 @router.get("/", response_model=List[KnowledgeBaseResponse])
-async def list_kbs(user: User = Depends(get_current_user)):
+async def list_kbs(
+    status: Optional[str] = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """List the knowledge bases visible to the caller's workspace."""
-    return [
-        kb for kb in _kbs.values() if kb["tenant_id"] == str(user.tenant_id)
-    ]
+    query = select(KnowledgeBase).where(KnowledgeBase.tenant_id == user.tenant_id)
+    if status:
+        query = query.where(KnowledgeBase.status == status)
+
+    result = await db.execute(query.order_by(KnowledgeBase.created_at.desc()))
+    return list(result.scalars().all())
 
 
 @router.get("/{kb_id}", response_model=KnowledgeBaseResponse)
-async def get_kb(kb_id: str, user: User = Depends(get_current_user)):
+async def get_kb(
+    kb_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Get knowledge base by ID"""
-    kb = _get_scoped(kb_id, user)
-    return kb
+    return await _get_scoped(db, kb_id, user)
+
+
+@router.get("/{kb_id}/stats")
+async def kb_stats(
+    kb_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Document and chunk counts for a knowledge base."""
+    await _get_scoped(db, kb_id, user)
+
+    documents = await db.execute(
+        select(func.count()).select_from(Document).where(Document.kb_id == kb_id)
+    )
+    chunks = await db.execute(
+        select(func.count()).select_from(Chunk).where(Chunk.kb_id == kb_id)
+    )
+
+    return {
+        "kb_id": str(kb_id),
+        "documents": documents.scalar_one(),
+        "chunks": chunks.scalar_one(),
+        "indexed_chunks": hybrid_index.chunk_count([str(kb_id)]),
+    }
 
 
 @router.put("/{kb_id}", response_model=KnowledgeBaseResponse)
 async def update_kb(
-    kb_id: str,
+    kb_id: UUID,
     kb: KnowledgeBaseCreate,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Update knowledge base"""
-    record = _get_scoped(kb_id, user)
+    record = await _get_scoped(db, kb_id, user)
 
-    record.update({
-        "name": kb.name,
-        "description": kb.description,
-        "slug": kb.slug or _slugify(kb.name),
-        "settings": kb.settings,
-        "updated_at": utcnow()
-    })
+    record.name = kb.name
+    record.description = kb.description
+    if kb.slug:
+        record.slug = kb.slug
+    record.settings = kb.settings or {}
 
+    await db.commit()
+    await db.refresh(record)
     return record
 
 
 @router.delete("/{kb_id}")
-async def delete_kb(kb_id: str, user: User = Depends(get_current_user)):
-    """Delete knowledge base"""
-    _get_scoped(kb_id, user)
+async def delete_kb(
+    kb_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a knowledge base with its documents, chunks and index entries."""
+    record = await _get_scoped(db, kb_id, user)
 
-    del _kbs[kb_id]
+    document_ids = list(
+        (
+            await db.execute(select(Document.id).where(Document.kb_id == record.id))
+        ).scalars().all()
+    )
+    for document_id in document_ids:
+        hybrid_index.delete_document(str(document_id))
+
+    await db.delete(record)
+    await db.commit()
     return {"message": "Knowledge base deleted"}
 
 
 @router.post("/{kb_id}/publish")
-async def publish_kb(kb_id: str, user: User = Depends(get_current_user)):
-    """Publish knowledge base"""
-    record = _get_scoped(kb_id, user)
+async def publish_kb(
+    kb_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Publish a knowledge base once it has at least one indexed document."""
+    record = await _get_scoped(db, kb_id, user)
 
-    record["is_published"] = True
-    record["status"] = "published"
-    record["updated_at"] = utcnow()
+    indexed = await db.execute(
+        select(func.count()).select_from(Document).where(Document.kb_id == record.id)
+    )
+    if not indexed.scalar_one():
+        raise HTTPException(
+            status_code=409,
+            detail="Add at least one document before publishing this knowledge base",
+        )
 
-    return {"message": "Knowledge base published", "kb_id": kb_id}
+    record.is_published = True
+    record.status = STATUS_PUBLISHED
+
+    await db.commit()
+    return {"message": "Knowledge base published", "kb_id": str(kb_id)}
 
 
-def _get_scoped(kb_id: str, user: User) -> dict:
-    """Return the knowledge base only if it belongs to the caller's workspace."""
-    record = _kbs.get(kb_id)
-    if record is None or record["tenant_id"] != str(user.tenant_id):
-        raise HTTPException(status_code=404, detail="Knowledge base not found")
-    return record
+@router.post("/{kb_id}/archive")
+async def archive_kb(
+    kb_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retire a knowledge base without deleting it."""
+    record = await _get_scoped(db, kb_id, user)
+
+    record.is_published = False
+    record.status = STATUS_ARCHIVED
+
+    await db.commit()
+    return {"message": "Knowledge base archived", "kb_id": str(kb_id)}

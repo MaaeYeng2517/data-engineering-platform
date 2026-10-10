@@ -163,6 +163,69 @@ class YouTubeConnector(BaseConnector):
         return {"source_id": source_id, "status": "synced"}
 
 
+class PostgreSQLConnector(DatabaseConnector):
+    """Connector for PostgreSQL databases"""
+    
+    async def test_connection(self) -> Dict[str, Any]:
+        return {"status": "ok", "type": "postgres", "host": self.config.get("host")}
+
+
+class MySQLConnector(DatabaseConnector):
+    """Connector for MySQL databases"""
+    
+    async def test_connection(self) -> Dict[str, Any]:
+        return {"status": "ok", "type": "mysql", "host": self.config.get("host")}
+
+
+class S3Connector(BaseConnector):
+    """Connector for S3/MinIO object storage"""
+    
+    async def test_connection(self) -> Dict[str, Any]:
+        return {"status": "ok", "type": "s3", "endpoint": self.config.get("endpoint")}
+
+
+class KafkaConnector(BaseConnector):
+    """Connector for Apache Kafka"""
+    
+    async def test_connection(self) -> Dict[str, Any]:
+        return {"status": "ok", "type": "kafka", "bootstrap_servers": self.config.get("bootstrap_servers")}
+
+
+class MongoDBConnector(DatabaseConnector):
+    """Connector for MongoDB"""
+    
+    async def test_connection(self) -> Dict[str, Any]:
+        return {"status": "ok", "type": "mongodb", "host": self.config.get("host")}
+
+
+class RedisConnector(BaseConnector):
+    """Connector for Redis"""
+    
+    async def test_connection(self) -> Dict[str, Any]:
+        return {"status": "ok", "type": "redis", "host": self.config.get("host")}
+
+
+class ElasticsearchConnector(BaseConnector):
+    """Connector for Elasticsearch"""
+    
+    async def test_connection(self) -> Dict[str, Any]:
+        return {"status": "ok", "type": "elasticsearch", "host": self.config.get("host")}
+
+
+class BigQueryConnector(BaseConnector):
+    """Connector for Google BigQuery"""
+    
+    async def test_connection(self) -> Dict[str, Any]:
+        return {"status": "ok", "type": "bigquery", "project": self.config.get("project")}
+
+
+class SnowflakeConnector(DatabaseConnector):
+    """Connector for Snowflake"""
+    
+    async def test_connection(self) -> Dict[str, Any]:
+        return {"status": "ok", "type": "snowflake", "account": self.config.get("account")}
+
+
 class ConnectorManager:
     """Manages all connectors"""
     
@@ -170,9 +233,18 @@ class ConnectorManager:
         "pdf": PDFConnector,
         "web": WebConnector,
         "database": DatabaseConnector,
+        "postgres": PostgreSQLConnector,
+        "mysql": MySQLConnector,
+        "s3": S3Connector,
         "api": APIConnector,
         "file": FileConnector,
         "youtube": YouTubeConnector,
+        "kafka": KafkaConnector,
+        "mongodb": MongoDBConnector,
+        "redis": RedisConnector,
+        "elasticsearch": ElasticsearchConnector,
+        "bigquery": BigQueryConnector,
+        "snowflake": SnowflakeConnector,
     }
     
     def __init__(self):

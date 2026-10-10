@@ -624,6 +624,25 @@ fastapi cloud login
 fastapi cloud env set --secret DATABASE_URL 'postgresql+asyncpg://…?ssl=require'
 ```
 
+### Everything → one Docker image
+
+`docker/unified/Dockerfile` builds a single image carrying the API, the Celery worker and beat,
+Airflow, dbt, the Jupyter toolbox and the compiled Next.js server. `PLATFORM_ROLE` decides which
+one a container runs, so a deployment is one pull instead of seven images.
+
+```bash
+docker build -f docker/unified/Dockerfile -t data-engineering-platform:latest .
+docker run -d -p 8000:8000 -e PLATFORM_ROLE=backend --env-file .env \
+  data-engineering-platform:latest
+```
+
+Airflow and dbt each keep a separate virtualenv inside the image because their pins contradict the
+backend's — `opentelemetry-instrumentation-fastapi==0.42b0` needs `opentelemetry-api==1.21.0`
+exactly, while the toolbox wants 1.29. Full explanation, role table, build args and trade-offs:
+[`docs/unified-image.md`](docs/unified-image.md).
+
+The per-service Dockerfiles are untouched and still what `docker-compose.yml` uses.
+
 ---
 
 ## 16. Implementation status — read this before planning work
@@ -664,6 +683,8 @@ dbt/              staging views and incremental marts
 quality/          Great Expectations suite and checkpoint
 config/           Airflow configuration
 docker/           images, init SQL, nginx, Prometheus rules, Grafana dashboards, OpenMetadata workflows
+  unified/        Dockerfile + role entrypoint for the single-image build
+docs/             architecture, development, roadmap, unified image
 tests/            pytest suite
 workers/          standalone in-process worker (not wired to anything)
 ```

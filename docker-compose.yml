@@ -246,6 +246,9 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    # Also published to Docker Hub so a server can `docker compose pull` instead
+    # of rebuilding. `docker compose up` still prefers the local build.
+    image: ${BACKEND_IMAGE:-maae120617/dataair-backend:1.0.0}
     container_name: dataair-backend
     environment:
       - APP_ENV=${APP_ENV:-development}
@@ -347,6 +350,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    # Published to Docker Hub alongside the backend image.
+    image: ${FRONTEND_IMAGE:-maae120617/dataair-frontend:1.0.0}
     container_name: dataair-frontend
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1

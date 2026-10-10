@@ -20,7 +20,7 @@
     "paths": {
       "@/*": ["./*"]
     },
-    "baseUrl": "",
+    "baseUrl": ".",
     "target": "ES2017",
     "forceConsistentCasingInFileNames": true
   },

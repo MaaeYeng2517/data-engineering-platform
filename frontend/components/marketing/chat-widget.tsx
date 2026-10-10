@@ -55,6 +55,17 @@ const suggestions = [
   'How does hybrid search rank results?',
   'Which LLM providers can this deployment use?',
   'How do I ground an answer in my own documents?',
+  'Build a data analysis pipeline for sales data',
+  'Create an AI agent to analyze customer feedback',
+  'Generate SQL for cohort analysis',
+  'Write a Python script to clean CSV data',
+  'Design a data warehouse schema for e-commerce',
+  'Explain how to set up ETL for this platform',
+  'Create a dashboard specification for sales metrics',
+  'Write code to detect anomalies in time series data',
+  'Plan a RAG system for technical documentation',
+  'Generate dbt models for a fact table',
+  'Build an AI coding agent workflow',
 ]
 
 let messageCounter = 0
@@ -359,7 +370,7 @@ export function ChatWidget({ kbIds = [] }: { kbIds?: string[] }) {
             <Sparkles className="h-4 w-4" />
           </div>
           <div>
-            <p className="text-sm font-semibold">Ask DataAir</p>
+            <p className="text-sm font-semibold">AI Agent Chat</p>
             <p className="text-xs text-muted-foreground">
               {providersLoading
                 ? 'Checking which providers this deployment can reach…'
@@ -411,10 +422,9 @@ export function ChatWidget({ kbIds = [] }: { kbIds?: string[] }) {
               <Bot className="h-6 w-6" />
             </div>
             <div>
-              <p className="text-sm font-medium">Try a question</p>
+              <p className="text-sm font-medium">AI Agent Ready</p>
               <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
-                Ask about ingestion, retrieval, governance or evaluation. Sign in to ground answers
-                in your own knowledge bases from the RAG workspace.
+                Build, analyze, and code with AI. Ask for data analysis, SQL, Python scripts, ETL workflows, or AI agent designs.
               </p>
             </div>
             <div className="flex flex-wrap justify-center gap-2 pt-1">
@@ -507,7 +517,7 @@ export function ChatWidget({ kbIds = [] }: { kbIds?: string[] }) {
               void send(input)
             }
           }}
-          placeholder="Ask about the platform, or what to build next…"
+          placeholder="Ask AI agent: data analysis, SQL, Python, ETL, workflow, coding..."
           rows={2}
           disabled={busy}
           aria-label="Message"

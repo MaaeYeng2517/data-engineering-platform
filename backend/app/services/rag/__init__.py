@@ -16,24 +16,30 @@ class ContextBuilder:
         """Build context from search results"""
         # Deduplication
         deduplicated = await self._deduplicate(results)
-        
+
         # Relevance filter
         relevant = await self._filter_relevance(query, deduplicated)
-        
+
         # Context compression
         compressed = await self._compress(relevant)
-        
+
         # Context ordering
         ordered = await self._order(compressed)
-        
+
         # Context budget
         final_context = await self._apply_budget(ordered)
-        
+
         return {
             "context": final_context,
-            "sources": [r.get("doc_id", r.get("chunk_id", "")) for r in final_context],
-            "total_tokens": sum(r.get("token_count", 0) for r in final_context),
-            "built_at": utcnow().isoformat()
+            "sources": [
+                result.get("document_id") or result.get("doc_id") or result.get("chunk_id", "")
+                for result in final_context
+            ],
+            "total_tokens": sum(
+                result.get("token_count") or len(result.get("content", "").split())
+                for result in final_context
+            ),
+            "built_at": utcnow().isoformat(),
         }
     
     async def _deduplicate(self, results: List[Dict]) -> List[Dict]:
@@ -50,8 +56,20 @@ class ContextBuilder:
         return unique
     
     async def _filter_relevance(self, query: str, results: List[Dict]) -> List[Dict]:
-        """Filter by relevance threshold"""
-        return [r for r in results if r.get("score", 0) > 0.1]
+        """Drop passages that carry no relevance signal.
+
+        Retrieval always sets ``score``, but a caller can hand results straight
+        to the builder, so fall back to whichever score is present rather than
+        discarding everything.
+        """
+        def relevance(result: Dict) -> float:
+            for key in ("score", "rerank_score", "hybrid_score"):
+                value = result.get(key)
+                if isinstance(value, (int, float)):
+                    return float(value)
+            return 0.0
+
+        return [result for result in results if relevance(result) > 0.1]
     
     async def _compress(self, results: List[Dict]) -> List[Dict]:
         """Compress context by truncating long content"""
@@ -68,7 +86,11 @@ class ContextBuilder:
     
     async def _order(self, results: List[Dict]) -> List[Dict]:
         """Order by relevance score"""
-        return sorted(results, key=lambda x: x.get("score", 0), reverse=True)
+        return sorted(
+            results,
+            key=lambda result: result.get("score") or result.get("hybrid_score") or 0.0,
+            reverse=True,
+        )
     
     async def _apply_budget(self, results: List[Dict]) -> List[Dict]:
         """Apply token budget"""
@@ -172,15 +194,22 @@ class RAGEngine:
             f"it is quoted directly for '{query}':\n\n" + "\n\n".join(passages)
         )
 
-    async def _extract_citations(self, context_data: Dict) -> List[Dict]:
-        """Extract citations from context"""
+    async def _extract_citations(self, context_data: Dict[str, Any]) -> List[Dict]:
+        """Turn the selected passages into numbered citations."""
         citations = []
-        for i, source in enumerate(context_data["context"]):
-            citations.append({
-                "index": i + 1,
-                "source": source.get("doc_id", source.get("chunk_id", "")),
-                "content_preview": source.get("content", "")[:100]
-            })
+        for position, source in enumerate(context_data["context"], start=1):
+            citations.append(
+                {
+                    "index": position,
+                    "source": source.get("document_id")
+                    or source.get("doc_id")
+                    or source.get("chunk_id", ""),
+                    "chunk_id": source.get("chunk_id", ""),
+                    "title": source.get("title", ""),
+                    "score": round(float(source.get("score", 0.0)), 6),
+                    "content_preview": source.get("content", "")[:100],
+                }
+            )
         return citations
 
 

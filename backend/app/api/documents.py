@@ -1,52 +1,83 @@
-"""Documents API endpoints"""
-import uuid
-from typing import List
+"""Documents API endpoints."""
+import hashlib
+from typing import List, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.utils.time import utcnow
 from backend.app.dependencies import get_current_user
+from backend.app.models.chunk import Chunk
+from backend.app.models.document import Document
+from backend.app.models.knowledge_base import KnowledgeBase
 from backend.app.models.user import User
 from backend.app.schemas import DocumentCreate, DocumentResponse
+from backend.app.services.indexing.pipeline import remove_document
+from backend.app.workers.tasks import index_document_task
+from backend.database import get_db
 
 router = APIRouter()
 
-# In-memory storage
-_documents = {}
+# Text extracted from an upload is stored on the document, but only these
+# characters are worth keeping per record; the chunks hold the rest.
+MAX_INLINE_CHARS = 2_000_000
 
 
-def _get_scoped(doc_id: str, user: User) -> dict:
+async def _get_scoped(db: AsyncSession, doc_id: UUID, user: User) -> Document:
     """Return the document only if it belongs to the caller's workspace."""
-    record = _documents.get(doc_id)
-    if record is None or record["tenant_id"] != str(user.tenant_id):
+    result = await db.execute(
+        select(Document)
+        .join(KnowledgeBase, KnowledgeBase.id == Document.kb_id)
+        .where(Document.id == doc_id, KnowledgeBase.tenant_id == user.tenant_id)
+    )
+    document = result.scalar_one_or_none()
+    if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
-    return record
+    return document
+
+
+async def _resolve_kb(db: AsyncSession, kb_id: UUID, user: User) -> KnowledgeBase:
+    """Load a knowledge base the caller is allowed to write to."""
+    result = await db.execute(
+        select(KnowledgeBase).where(
+            KnowledgeBase.id == kb_id,
+            KnowledgeBase.tenant_id == user.tenant_id,
+        )
+    )
+    kb = result.scalar_one_or_none()
+    if kb is None:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    return kb
 
 
 @router.post("/", response_model=DocumentResponse)
 async def create_document(
     doc: DocumentCreate,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Create a new document"""
-    doc_id = str(uuid.uuid4())
+    """Create a document from inline content and index it for search."""
+    kb = await _resolve_kb(db, doc.kb_id, user)
 
-    new_doc = {
-        "id": doc_id,
-        "kb_id": str(doc.kb_id),
-        "tenant_id": str(user.tenant_id),
-        "created_by": str(user.id),
-        "title": doc.title,
-        "source_type": doc.source_type,
-        "source_url": doc.source_url,
-        "status": "pending",
-        "version": "1.0",
-        "is_published": False,
-        "created_at": utcnow()
-    }
+    document = Document(
+        kb_id=kb.id,
+        title=doc.title,
+        source_type=doc.source_type,
+        source_url=doc.source_url,
+        content=doc.content,
+        data=doc.metadata,
+        status="pending",
+    )
+    db.add(document)
+    await db.flush()
 
-    _documents[doc_id] = new_doc
-    return new_doc
+    index_document_task.delay(str(document.id), content=document.content)
+    document.status = "queued"
+
+    await db.commit()
+    await db.refresh(document)
+    return document
 
 
 @router.post("/upload", response_model=DocumentResponse)
@@ -55,71 +86,129 @@ async def upload_document(
     kb_id: str = Form(...),
     title: str = Form(None),
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Upload a document file into a knowledge base.
+    """Upload a document file into a knowledge base and index it.
 
     ``kb_id`` and ``title`` are read as form fields because multipart uploads
     cannot carry a JSON body; a query parameter would be silently ignored.
     """
-    doc_id = str(uuid.uuid4())
+    try:
+        parsed_kb_id = UUID(kb_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="kb_id must be a UUID") from exc
 
-    # Read file content
+    kb = await _resolve_kb(db, parsed_kb_id, user)
+
     content = await file.read()
+    text = content.decode("utf-8", errors="ignore")
 
-    new_doc = {
-        "id": doc_id,
-        "kb_id": kb_id,
-        "tenant_id": str(user.tenant_id),
-        "created_by": str(user.id),
-        "title": title or file.filename,
-        "source_type": "file",
-        "source_url": None,
-        "status": "processing",
-        "version": "1.0",
-        "is_published": False,
-        "created_at": utcnow(),
-        "file_size": len(content),
-        "mime_type": file.content_type
-    }
+    document = Document(
+        kb_id=kb.id,
+        title=title or file.filename or "Untitled",
+        source_type="file",
+        file_size=len(content),
+        mime_type=file.content_type,
+        checksum=hashlib.sha256(content).hexdigest(),
+        content=text[:MAX_INLINE_CHARS],
+        status="processing",
+    )
+    db.add(document)
+    await db.flush()
 
-    _documents[doc_id] = new_doc
+    index_document_task.delay(str(document.id), content=document.content)
+    document.status = "queued"
 
-    from backend.app.services.processing import processing_engine
-
-    # Extract text, chunk and derive entities so the record is immediately searchable.
-    content_str = content.decode('utf-8', errors='ignore')
-    result = await processing_engine.process(content_str, "file")
-
-    _documents[doc_id]["status"] = "processed"
-    _documents[doc_id]["content"] = result["extracted"]
-    _documents[doc_id]["chunks"] = result["chunks"]
-    _documents[doc_id]["entities"] = result["entities"]
-
-    return new_doc
+    await db.commit()
+    await db.refresh(document)
+    return document
 
 
 @router.get("/", response_model=List[DocumentResponse])
-async def list_documents(kb_id: str = None, user: User = Depends(get_current_user)):
-    """List documents in the caller's workspace, optionally filtered by knowledge base"""
-    docs = [
-        record for record in _documents.values()
-        if record["tenant_id"] == str(user.tenant_id)
-    ]
-    if kb_id:
-        docs = [record for record in docs if record["kb_id"] == kb_id]
-    return docs
+async def list_documents(
+    kb_id: Optional[UUID] = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List documents in the caller's workspace, optionally by knowledge base."""
+    query = (
+        select(Document)
+        .join(KnowledgeBase, KnowledgeBase.id == Document.kb_id)
+        .where(KnowledgeBase.tenant_id == user.tenant_id)
+        .order_by(Document.created_at.desc())
+    )
+    if kb_id is not None:
+        query = query.where(Document.kb_id == kb_id)
+
+    result = await db.execute(query)
+    return list(result.scalars().all())
 
 
 @router.get("/{doc_id}", response_model=DocumentResponse)
-async def get_document(doc_id: str, user: User = Depends(get_current_user)):
+async def get_document(
+    doc_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Get document by ID"""
-    return _get_scoped(doc_id, user)
+    return await _get_scoped(db, doc_id, user)
+
+
+@router.get("/{doc_id}/chunks")
+async def list_document_chunks(
+    doc_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List the chunks a document was split into."""
+    await _get_scoped(db, doc_id, user)
+
+    result = await db.execute(
+        select(Chunk)
+        .where(Chunk.document_id == doc_id)
+        .order_by(Chunk.chunk_index)
+    )
+    return [
+        {
+            "id": str(chunk.id),
+            "document_id": str(chunk.document_id),
+            "chunk_index": chunk.chunk_index,
+            "token_count": chunk.token_count,
+            "content": chunk.content,
+        }
+        for chunk in result.scalars().all()
+    ]
+
+
+@router.post("/{doc_id}/reindex", response_model=DocumentResponse)
+async def reindex_document(
+    doc_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-chunk and re-embed a document from its stored content."""
+    document = await _get_scoped(db, doc_id, user)
+
+    document.status = "processing"
+    index_document_task.delay(str(document.id), content=document.content)
+    document.status = "queued"
+
+    await db.commit()
+    await db.refresh(document)
+    return document
 
 
 @router.delete("/{doc_id}")
-async def delete_document(doc_id: str, user: User = Depends(get_current_user)):
-    """Delete document"""
-    _get_scoped(doc_id, user)
+async def delete_document(
+    doc_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a document, its chunks and its index entries."""
+    document = await _get_scoped(db, doc_id, user)
 
-    del _documents[doc_id]
+    await remove_document(db, document.id)
+    await db.delete(document)
+    await db.commit()
+
     return {"message": "Document deleted"}

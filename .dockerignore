@@ -1,0 +1,43 @@
+# Keep the build context small and, more importantly, keep secrets out of the
+# images. Docker reads this file, not .gitignore, so anything git ignores is
+# still copied into the image by `COPY . .` unless it is listed here.
+
+# Local environment overrides — these hold real credentials.
+.env
+.env.local
+.env.*.local
+
+# Credential material that must never reach a registry.
+docker/prometheus/secrets/
+*.password
+docker/ssl/
+
+# VCS and tooling state.
+.git
+.gitignore
+.kilo/worktrees/
+.kilo/agent-manager.json
+
+# Python build and cache artefacts.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+.venv/
+venv/
+
+# Node artefacts. The root context feeds the backend image, which never needs
+# the frontend's installed packages or build output.
+node_modules/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.vercel/
+*.tsbuildinfo
+
+# Generated run output.
+logs/
+data/
+notebooks/

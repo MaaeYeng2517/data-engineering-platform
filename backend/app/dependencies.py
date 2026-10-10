@@ -6,8 +6,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from backend.app.models.api_key import ApiKey
 from backend.app.models.user import User, UserRole
-from backend.app.security import ACCESS_TOKEN_COOKIE_NAME, decode_token
+from backend.app.security import ACCESS_TOKEN_COOKIE_NAME, decode_token, hash_api_key
+from backend.app.utils.time import utcnow
 from backend.config import ADMIN_EMAILS
 from backend.database import get_db
 
@@ -31,8 +33,59 @@ def _request_token(request: Request) -> str | None:
     return _bearer_token(request) or request.cookies.get(ACCESS_TOKEN_COOKIE_NAME)
 
 
+async def _load_active_user(db: AsyncSession, user_id) -> User:
+    """Load a user and reject the account or its workspace if either is disabled."""
+    result = await db.execute(
+        select(User).options(selectinload(User.tenant)).where(User.id == user_id)
+    )
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise _UNAUTHENTICATED
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled")
+    if user.tenant is not None and not user.tenant.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Workspace is disabled")
+    return user
+
+
+async def resolve_api_key(db: AsyncSession, raw_key: str) -> ApiKey:
+    """Resolve an ``x-api-key`` value to its key record.
+
+    The stored digest is an HMAC of the raw key, so lookup is a single indexed
+    equality and the plaintext never has to be compared in the database.
+    """
+    result = await db.execute(
+        select(ApiKey).where(ApiKey.key_hash == hash_api_key(raw_key))
+    )
+    api_key = result.scalar_one_or_none()
+    if api_key is None:
+        raise _UNAUTHENTICATED
+    if not api_key.is_active or api_key.revoked_at is not None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="API key is revoked")
+    if api_key.expires_at is not None and api_key.expires_at <= utcnow():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="API key has expired")
+    return api_key
+
+
 async def get_current_user(request: Request, db: AsyncSession = Depends(get_db)) -> User:
-    """Resolve the authenticated user from a bearer token or the access cookie."""
+    """Resolve the authenticated user.
+
+    Three credentials are accepted: an API key, a bearer token, and the access
+    cookie the browser client uses. An API key identifies the user directly;
+    a token names one and is then re-read from the database.
+    """
+    raw_key = request.headers.get("x-api-key")
+    if raw_key:
+        api_key = await resolve_api_key(db, raw_key.strip())
+        # Recorded here rather than in middleware: this is the only place that
+        # knows which key a request arrived with.
+        request.state.api_key_id = str(api_key.id)
+        user = await _load_active_user(db, api_key.user_id)
+        request.state.user_id = str(user.id)
+        request.state.tenant_id = str(user.tenant_id)
+        api_key.last_used_at = utcnow()
+        return user
+
     token = _request_token(request)
     if not token:
         raise _UNAUTHENTICATED
@@ -45,16 +98,9 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
     except Exception as exc:
         raise _UNAUTHENTICATED from exc
 
-    result = await db.execute(
-        select(User).options(selectinload(User.tenant)).where(User.id == user_id)
-    )
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise _UNAUTHENTICATED
-    if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled")
-    if user.tenant is not None and not user.tenant.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Workspace is disabled")
+    user = await _load_active_user(db, user_id)
+    request.state.user_id = str(user.id)
+    request.state.tenant_id = str(user.tenant_id)
     return user
 
 

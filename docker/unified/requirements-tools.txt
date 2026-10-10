@@ -1,0 +1,22 @@
+# Extra packages for the unified image's main Python environment.
+#
+# The backend's own requirements.txt stays authoritative for anything it already
+# pins (SQLAlchemy, pandas, OpenTelemetry 1.21). Those six overlapping pins are
+# deliberately NOT repeated here, because the instrumentation packages the
+# backend loads require opentelemetry-api==1.21.0 exactly.
+#
+# dbt is not in this list: it lives in its own /opt/dbt-venv, matching the
+# existing docker/airflow/Dockerfile, so its dbt-core pins cannot fight Airflow's
+# constraints.
+great-expectations==0.18.15
+jupyterlab==4.3.3
+notebook==7.3.0
+duckdb==1.1.3
+polars==1.14.0
+pyarrow==18.0.0
+psycopg2-binary==2.9.10
+matplotlib==3.9.2
+seaborn==0.13.2
+openlineage-python==0.20.4
+python-dotenv==1.0.1
+ruff==0.7.3

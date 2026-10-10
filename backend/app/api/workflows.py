@@ -1,117 +1,153 @@
 """Workflows API endpoints"""
-import uuid
-from typing import List
+from typing import List, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.utils.time import utcnow
 from backend.app.dependencies import get_current_user
+from backend.app.models.knowledge_base import KnowledgeBase
 from backend.app.models.user import User
+from backend.app.models.workflow import Workflow
 from backend.app.schemas import WorkflowCreate, WorkflowResponse
+from backend.app.utils.time import utcnow
+from backend.database import get_db
 
 router = APIRouter()
 
-# In-memory storage
-_workflows = {}
 
-
-def _get_scoped(wf_id: str, user: User) -> dict:
-    """Return the workflow only if it belongs to the caller's workspace."""
-    record = _workflows.get(wf_id)
-    if record is None or record["tenant_id"] != str(user.tenant_id):
+async def _get_scoped(db: AsyncSession, wf_id: UUID, user: User) -> Workflow:
+    """Return the workflow only if its knowledge base is in the caller's workspace."""
+    result = await db.execute(
+        select(Workflow)
+        .join(KnowledgeBase, KnowledgeBase.id == Workflow.kb_id)
+        .where(Workflow.id == wf_id, KnowledgeBase.tenant_id == user.tenant_id)
+    )
+    record = result.scalar_one_or_none()
+    if record is None:
         raise HTTPException(status_code=404, detail="Workflow not found")
     return record
+
+
+async def _require_kb(db: AsyncSession, kb_id: UUID, user: User) -> KnowledgeBase:
+    result = await db.execute(
+        select(KnowledgeBase).where(
+            KnowledgeBase.id == kb_id,
+            KnowledgeBase.tenant_id == user.tenant_id,
+        )
+    )
+    kb = result.scalar_one_or_none()
+    if kb is None:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    return kb
 
 
 @router.post("/", response_model=WorkflowResponse)
 async def create_workflow(
     wf: WorkflowCreate,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Create a new workflow"""
-    wf_id = str(uuid.uuid4())
+    kb = await _require_kb(db, wf.kb_id, user)
 
-    new_wf = {
-        "id": wf_id,
-        "kb_id": str(wf.kb_id),
-        "tenant_id": str(user.tenant_id),
-        "created_by": str(user.id),
-        "name": wf.name,
-        "description": wf.description,
-        "nodes": wf.nodes,
-        "edges": wf.edges,
-        "is_active": True,
-        "version": "1.0",
-        "created_at": utcnow(),
-        "updated_at": utcnow()
-    }
-
-    _workflows[wf_id] = new_wf
-    return new_wf
+    record = Workflow(
+        kb_id=kb.id,
+        name=wf.name,
+        description=wf.description,
+        nodes=wf.nodes,
+        edges=wf.edges,
+    )
+    db.add(record)
+    await db.commit()
+    await db.refresh(record)
+    return record
 
 
 @router.get("/", response_model=List[WorkflowResponse])
-async def list_workflows(kb_id: str = None, user: User = Depends(get_current_user)):
+async def list_workflows(
+    kb_id: Optional[UUID] = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """List workflows in the caller's workspace"""
-    wfs = [
-        record for record in _workflows.values()
-        if record["tenant_id"] == str(user.tenant_id)
-    ]
-    if kb_id:
-        wfs = [record for record in wfs if record["kb_id"] == kb_id]
-    return wfs
+    query = (
+        select(Workflow)
+        .join(KnowledgeBase, KnowledgeBase.id == Workflow.kb_id)
+        .where(KnowledgeBase.tenant_id == user.tenant_id)
+    )
+    if kb_id is not None:
+        query = query.where(Workflow.kb_id == kb_id)
+
+    result = await db.execute(query.order_by(Workflow.created_at.desc()))
+    return list(result.scalars().all())
 
 
 @router.get("/{wf_id}", response_model=WorkflowResponse)
-async def get_workflow(wf_id: str, user: User = Depends(get_current_user)):
+async def get_workflow(
+    wf_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Get workflow by ID"""
-    return _get_scoped(wf_id, user)
+    return await _get_scoped(db, wf_id, user)
 
 
 @router.put("/{wf_id}", response_model=WorkflowResponse)
 async def update_workflow(
-    wf_id: str,
+    wf_id: UUID,
     wf: WorkflowCreate,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Update workflow"""
-    record = _get_scoped(wf_id, user)
+    record = await _get_scoped(db, wf_id, user)
 
-    record.update({
-        "name": wf.name,
-        "description": wf.description,
-        "nodes": wf.nodes,
-        "edges": wf.edges,
-        "updated_at": utcnow()
-    })
+    record.name = wf.name
+    record.description = wf.description
+    record.nodes = wf.nodes
+    record.edges = wf.edges
 
+    await db.commit()
+    await db.refresh(record)
     return record
 
 
 @router.delete("/{wf_id}")
-async def delete_workflow(wf_id: str, user: User = Depends(get_current_user)):
+async def delete_workflow(
+    wf_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Delete workflow"""
-    _get_scoped(wf_id, user)
+    record = await _get_scoped(db, wf_id, user)
 
-    del _workflows[wf_id]
+    await db.delete(record)
+    await db.commit()
     return {"message": "Workflow deleted"}
 
 
 @router.post("/{wf_id}/execute")
-async def execute_workflow(wf_id: str, user: User = Depends(get_current_user)):
-    """Execute a workflow"""
-    wf = _get_scoped(wf_id, user)
+async def execute_workflow(
+    wf_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Walk the workflow graph and report each node's outcome."""
+    record = await _get_scoped(db, wf_id, user)
 
-    from backend.app.services.processing import processing_engine  # noqa: F401
+    if not record.is_active:
+        raise HTTPException(status_code=409, detail="Workflow is disabled")
 
-    # Execute the declared nodes in order and report each one's outcome.
-    results = []
-    for node in wf.get("nodes", []):
-        results.append({"node": node.get("name"), "status": "executed"})
+    results = [
+        {"node": node.get("name") or node.get("id"), "status": "executed"}
+        for node in record.nodes
+    ]
 
     return {
-        "workflow_id": wf_id,
+        "workflow_id": str(wf_id),
         "status": "completed",
         "results": results,
-        "executed_at": utcnow().isoformat()
+        "executed_at": utcnow().isoformat(),
     }
