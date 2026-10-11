@@ -30,3 +30,5 @@ class KnowledgeBase(Base):
     metadata_schemas = relationship("MetadataSchema", back_populates="knowledge_base")
     workflows = relationship("Workflow", back_populates="knowledge_base")
     evaluation_datasets = relationship("EvaluationDataset", back_populates="knowledge_base")
+    tags = relationship("Tag", secondary="tag_kb_association", back_populates="kbs")
+    approval_workflows = relationship("ApprovalWorkflow", back_populates="knowledge_base")

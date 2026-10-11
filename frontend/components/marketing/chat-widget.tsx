@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import {
   Bot,
   CornerDownLeft,
@@ -464,12 +466,32 @@ export function ChatWidget({ kbIds = [] }: { kbIds?: string[] }) {
                   <span>{message.role === 'user' ? 'You' : 'Assistant'}</span>
                 </div>
 
-                <p className="whitespace-pre-wrap break-words">
-                  {message.content}
-                  {message.pending && !message.content ? (
-                    <Loader2 className="ml-1 inline h-3.5 w-3.5 animate-spin" />
-                  ) : null}
-                </p>
+                 {message.role === 'assistant' ? (
+                   <ReactMarkdown
+                     remarkPlugins={[remarkGfm]}
+                     components={{
+                       p: ({ node, ...props }) => <p className="mb-2 break-words" {...props} />,
+                       ul: ({ node, ...props }) => <ul className="mb-2 ml-5 list-disc" {...props} />,
+                       ol: ({ node, ...props }) => <ol className="mb-2 ml-5 list-decimal" {...props} />,
+                       code: ({ node, ...props }) => (
+                         <code className="rounded bg-muted px-1.5 py-0.5 text-sm" {...props} />
+                       ),
+                       pre: ({ node, ...props }) => (
+                         <pre className="overflow-x-auto rounded-lg bg-muted p-3 text-sm" {...props} />
+                       ),
+                       blockquote: ({ node, ...props }) => (
+                         <blockquote className="border-l-2 border-muted pl-4 italic" {...props} />
+                       ),
+                     }}
+                   >
+                     {message.content}
+                   </ReactMarkdown>
+                 ) : (
+                   <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                 )}
+                {message.pending && !message.content ? (
+                  <Loader2 className="ml-1 inline h-3.5 w-3.5 animate-spin" />
+                ) : null}
 
                 {message.role === 'assistant' && (message.model || message.latencyMs) && (
                   <div className="flex flex-wrap items-center gap-1.5 pt-0.5">

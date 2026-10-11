@@ -24,3 +24,4 @@ class Source(Base):
 
     knowledge_base = relationship("KnowledgeBase", back_populates="sources")
     documents = relationship("Document", back_populates="source")
+    tags = relationship("Tag", secondary="tag_source_association", back_populates="sources")

@@ -115,14 +115,15 @@ class RAGEngine:
         self.context_builder = ContextBuilder()
     
     async def answer(self, query: str, kb_ids: List[str], 
-                    metadata_filters: Dict = None, limit: int = 5,
-                    temperature: float = 0.7, max_tokens: int = 1000) -> Dict[str, Any]:
+                     metadata_filters: Dict = None, limit: int = 5,
+                     temperature: float = 0.7, max_tokens: int = 1000,
+                     db=None) -> Dict[str, Any]:
         """Generate answer using RAG"""
         from backend.app.services.retrieval import retrieval_engine
         
         # Retrieve relevant documents
         search_results = await retrieval_engine.search(
-            query, kb_ids, metadata_filters, limit
+            query, kb_ids, metadata_filters, limit, db=db
         )
         
         # Build context

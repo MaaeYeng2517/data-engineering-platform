@@ -73,7 +73,7 @@ function statusBadge(status?: string) {
   }
 }
 
-function SourceTypeBadge(type?: string) {
+function SourceTypeBadge({ type }: { type?: string }) {
   const found = SOURCE_TYPES.find(t => t.value === type)
   return <Badge variant="outline">{found?.label ?? type ?? '—'}</Badge>
 }

@@ -1,5 +1,14 @@
 import '@testing-library/jest-dom'
 
+// Mock react-markdown in Jest to avoid ESM transform issues in node_modules
+jest.mock('react-markdown', () => {
+  const React = require('react')
+  const Markdown = ({ children }: { children?: React.ReactNode }) =>
+    React.createElement('div', { 'data-testid': 'markdown' }, children)
+  return { __esModule: true, default: Markdown, ReactMarkdown: Markdown }
+})
+jest.mock('remark-gfm', () => ({}))
+
 // React 18 wants this flag so `act` warnings do not fail assertions in tests.
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 

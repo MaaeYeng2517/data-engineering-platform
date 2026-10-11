@@ -41,3 +41,6 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    governance_policies = relationship("GovernancePolicy", back_populates="creator")
+    created_approvals = relationship("ApprovalWorkflow", foreign_keys="ApprovalWorkflow.creator_id", back_populates="creator")
+    decided_approvals = relationship("ApprovalWorkflow", foreign_keys="ApprovalWorkflow.decided_by", back_populates="decider")

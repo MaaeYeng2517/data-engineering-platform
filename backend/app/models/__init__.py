@@ -6,6 +6,7 @@ from backend.app.models.contact import ContactMessage, ContactStatus
 from backend.app.models.document import Document
 from backend.app.models.entity import Entity, Relationship
 from backend.app.models.evaluation import EvaluationDataset, EvaluationRun
+from backend.app.models.governance import ApprovalWorkflow, GovernancePolicy
 from backend.app.models.knowledge_base import KnowledgeBase
 from backend.app.models.metadata import MetadataSchema
 from backend.app.models.profile import (
@@ -19,15 +20,18 @@ from backend.app.models.profile import (
     ServiceType,
 )
 from backend.app.models.source import Source
+from backend.app.models.tag import Tag
 from backend.app.models.tenant import Tenant
 from backend.app.models.user import User, UserRole
 from backend.app.models.work_group import WorkGroup, WorkGroupMember, WorkGroupRole
 from backend.app.models.workflow import Workflow
+from backend.app.models.external_api import ExternalAPI
 
 __all__ = [
     "ApiKey",
     "ApiKeyScope",
     "ApiUsageLog",
+    "ApprovalWorkflow",
     "AuthType",
     "Chunk",
     "CloudProvider",
@@ -37,6 +41,8 @@ __all__ = [
     "Entity",
     "EvaluationDataset",
     "EvaluationRun",
+    "ExternalAPI",
+    "GovernancePolicy",
     "KnowledgeBase",
     "MembershipPlan",
     "MetadataSchema",
@@ -48,6 +54,7 @@ __all__ = [
     "ServiceHealth",
     "ServiceType",
     "Source",
+    "Tag",
     "Subscription",
     "SubscriptionStatus",
     "Tenant",

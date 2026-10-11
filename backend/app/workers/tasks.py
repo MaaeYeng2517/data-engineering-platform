@@ -38,6 +38,7 @@ async def _index_stored_document(document_id: UUID, content: str | None) -> Dict
             return {"doc_id": str(document_id), "chunk_count": 0, "chunk_ids": []}
 
         chunk_ids = await index_document(db, document, content=content)
+        document.status = "processed"
         await db.commit()
         return {"doc_id": str(document_id), "chunk_count": len(chunk_ids), "chunk_ids": chunk_ids}
 

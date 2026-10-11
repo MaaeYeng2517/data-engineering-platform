@@ -8,8 +8,9 @@ from typing import Any, Dict, Iterable, List, Optional
 import time
 import logging
 
-from backend.app.services.indexing import hybrid_index
+from backend.app.services import indexing
 
+logger = logging.getLogger(__name__)
 logger = logging.getLogger(__name__)
 
 # How many candidates to pull from the index per requested result. Reranking
@@ -70,9 +71,14 @@ class Reranker:
 class RetrievalEngine:
     """Main retrieval engine."""
 
-    def __init__(self):
+    def __init__(self, index=None):
         self.metadata_filter = MetadataFilter()
         self.reranker = Reranker()
+        self._index = index
+
+    @property
+    def hybrid_index(self):
+        return self._index if self._index is not None else indexing.hybrid_index
 
     async def search(
         self,
@@ -82,11 +88,25 @@ class RetrievalEngine:
         limit: int = 10,
         search_type: str = "hybrid",
         score_threshold: Optional[float] = None,
+        db=None,
     ) -> Dict[str, Any]:
-        """Perform hybrid search scoped to the given knowledge bases."""
+        """Perform hybrid search scoped to the given knowledge bases.
+
+        When ``db`` is supplied and the in-memory index is empty, the index is
+        rehydrated from Postgres first, so a freshly started API process (or one
+        that has no documents indexed yet) can still answer.
+        """
         start_time = time.time()
 
-        candidates = hybrid_index.search(
+        if db is not None and len(self.hybrid_index) == 0:
+            try:
+                from backend.app.services.indexing.pipeline import rehydrate_index
+
+                await rehydrate_index(db)
+            except Exception:
+                logger.warning("Lazy index rehydration failed", exc_info=True)
+
+        candidates = self.hybrid_index.search(
             query,
             limit=limit * CANDIDATE_MULTIPLIER,
             metadata_filter=metadata_filters,
@@ -137,7 +157,7 @@ class RetrievalEngine:
 
     async def graph_search(self, query: str, limit: int = 10) -> List[Dict]:
         """Graph-based search over indexed entities."""
-        return hybrid_index.graph_index.search(query, limit)
+        return self.hybrid_index.graph_index.search(query, limit)
 
     def keyword_index_search(
         self,
@@ -145,7 +165,7 @@ class RetrievalEngine:
         limit: int = 10,
         metadata_filter: Optional[Dict] = None,
     ) -> List[Dict]:
-        return hybrid_index.keyword_index.search(query, limit, metadata_filter)
+        return self.hybrid_index.keyword_index.search(query, limit, metadata_filter)
 
     def vector_index_search(
         self,
@@ -153,7 +173,7 @@ class RetrievalEngine:
         limit: int = 10,
         metadata_filter: Optional[Dict] = None,
     ) -> List[Dict]:
-        return hybrid_index.vector_index.search(query, limit, metadata_filter)
+        return self.hybrid_index.vector_index.search(query, limit, metadata_filter)
 
     @staticmethod
     def _scope(

@@ -6,9 +6,9 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import bcrypt
 import jwt
 from fastapi import Response
-from passlib.context import CryptContext
 from starlette.responses import Response as StarletteResponse
 
 from backend.config import (
@@ -33,19 +33,28 @@ REFRESH_TOKEN_TYPE = "refresh"
 API_KEY_PREFIX = "dk"
 API_KEY_PREFIX_LENGTH = 12
 
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# bcrypt limits passwords to 72 bytes. Hash first when a password exceeds
+# that so passlib-style callers still work without truncation surprises.
+_BCRYPT_MAX_BYTES = 72
+
+
+def _truncate_for_bcrypt(password: str) -> bytes:
+    raw = password.encode("utf-8")
+    return raw[:_BCRYPT_MAX_BYTES]
 
 
 def hash_password(password: str) -> str:
     """Hash a plaintext password with bcrypt."""
-    return _pwd_context.hash(password)
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(_truncate_for_bcrypt(password), salt)
+    return hashed.decode("utf-8")
 
 
 def verify_password(password: str, hashed_password: str) -> bool:
     """Check a plaintext password against a stored hash."""
     try:
-        return _pwd_context.verify(password, hashed_password)
-    except ValueError:
+        return bcrypt.checkpw(_truncate_for_bcrypt(password), hashed_password.encode("utf-8"))
+    except (ValueError, TypeError):
         logger.warning("Password verification failed against an unreadable hash")
         return False
 

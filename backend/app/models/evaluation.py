@@ -12,6 +12,7 @@ class EvaluationDataset(Base):
     __tablename__ = "evaluation_datasets"
 
     id = Column(UUID, primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID, ForeignKey("tenants.id"), nullable=False, index=True)
     kb_id = Column(UUID, ForeignKey("knowledge_bases.id"), nullable=False)
     name = Column(String(255), nullable=False)
     description = Column(Text)
@@ -28,6 +29,8 @@ class EvaluationRun(Base):
     __tablename__ = "evaluation_runs"
 
     id = Column(UUID, primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID, ForeignKey("tenants.id"), nullable=False, index=True)
+    kb_id = Column(UUID, ForeignKey("knowledge_bases.id"), nullable=False, index=True)
     dataset_id = Column(UUID, ForeignKey("evaluation_datasets.id"))
     name = Column(String(255))
     metrics = Column(JSON, default=dict, nullable=False)

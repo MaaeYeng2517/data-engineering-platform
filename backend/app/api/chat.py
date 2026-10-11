@@ -14,7 +14,9 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Sequence, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.database import get_db
 from backend.app.dependencies import get_optional_user
 from backend.app.models.user import User
 from backend.app.schemas import (
@@ -129,7 +131,7 @@ def _to_messages(turns: Sequence[ChatTurn]) -> List[LLMMessage]:
 
 
 async def _grounded_context(
-    question: str, kb_ids: Sequence[Any]
+    question: str, kb_ids: Sequence[Any], db: AsyncSession | None = None
 ) -> Tuple[str, List[ChatSource]]:
     """Retrieve passages for the question and turn them into prompt context."""
     if not kb_ids:
@@ -139,7 +141,7 @@ async def _grounded_context(
 
     try:
         result = await retrieval_engine.search(
-            question, [str(kb_id) for kb_id in kb_ids], limit=GROUNDING_LIMIT
+            question, [str(kb_id) for kb_id in kb_ids], limit=GROUNDING_LIMIT, db=db
         )
     except Exception as exc:
         logger.warning("Grounding retrieval failed: %s", exc)
@@ -209,6 +211,7 @@ async def create_chat_completion(
     payload: ChatRequest,
     request: Request,
     user: Optional[User] = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Answer a chat turn with the selected or automatically resolved provider."""
     _enforce_rate_limit(request, user)
@@ -216,7 +219,7 @@ async def create_chat_completion(
     turns = payload.turns()
     messages = _to_messages(turns)
     question = messages[-1].content
-    context, sources = await _grounded_context(question, payload.kb_ids)
+    context, sources = await _grounded_context(question, payload.kb_ids, db=db)
 
     try:
         result = await llm_gateway.generate(
@@ -248,6 +251,7 @@ async def stream_chat_completion(
     payload: ChatRequest,
     request: Request,
     user: Optional[User] = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Stream the same answer as server-sent events.
 
@@ -260,7 +264,7 @@ async def stream_chat_completion(
     turns = payload.turns()
     messages = _to_messages(turns)
     question = messages[-1].content
-    context, sources = await _grounded_context(question, payload.kb_ids)
+    context, sources = await _grounded_context(question, payload.kb_ids, db=db)
 
     options = {
         "system": _system_prompt(context),

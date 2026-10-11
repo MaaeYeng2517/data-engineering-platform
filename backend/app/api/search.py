@@ -1,16 +1,24 @@
 """Search API endpoints"""
+import logging
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.schemas import SearchRequest, SearchResponse
+from backend.database import get_db
 
 router = APIRouter()
 
+logger = logging.getLogger(__name__)
+
 
 @router.post("/", response_model=SearchResponse)
-async def search(request: SearchRequest):
+async def search(
+    request: SearchRequest,
+    db: AsyncSession = Depends(get_db),
+):
     """Perform hybrid search scoped to the requested knowledge bases."""
     from backend.app.services.retrieval import retrieval_engine
 
@@ -21,6 +29,7 @@ async def search(request: SearchRequest):
         limit=request.limit,
         search_type=request.search_type,
         score_threshold=request.score_threshold,
+        db=db,
     )
     return result
 

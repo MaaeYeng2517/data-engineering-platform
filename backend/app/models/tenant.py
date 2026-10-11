@@ -27,3 +27,6 @@ class Tenant(Base):
     api_keys = relationship("ApiKey", back_populates="tenant")
     contact_messages = relationship("ContactMessage", back_populates="tenant")
     work_groups = relationship("WorkGroup", back_populates="tenant")
+    external_apis = relationship("ExternalAPI", back_populates="tenant")
+    governance_policies = relationship("GovernancePolicy", back_populates="tenant")
+    approval_workflows = relationship("ApprovalWorkflow", back_populates="tenant")

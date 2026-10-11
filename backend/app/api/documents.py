@@ -13,7 +13,7 @@ from backend.app.models.document import Document
 from backend.app.models.knowledge_base import KnowledgeBase
 from backend.app.models.user import User
 from backend.app.schemas import DocumentCreate, DocumentResponse
-from backend.app.services.indexing.pipeline import remove_document
+from backend.app.services.indexing.pipeline import index_document, remove_document
 from backend.app.workers.tasks import index_document_task
 from backend.database import get_db
 
@@ -51,6 +51,25 @@ async def _resolve_kb(db: AsyncSession, kb_id: UUID, user: User) -> KnowledgeBas
     return kb
 
 
+async def _index_inline(db: AsyncSession, document: Document, content: str) -> None:
+    """Chunk, embed and index a document in this process's in-memory index.
+
+    The API and the Celery worker are separate processes, each owning its own
+    ``hybrid_index``. Indexing inline here lets search see the document
+    immediately, while the Celery task keeps the worker's copy in sync for
+    background jobs.
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+    try:
+        await index_document(db, document, content=content)
+        document.status = "processed"
+    except Exception:
+        logger.exception("Inline indexing failed for document %s", document.id)
+        document.status = "failed"
+
+
 @router.post("/", response_model=DocumentResponse)
 async def create_document(
     doc: DocumentCreate,
@@ -72,8 +91,8 @@ async def create_document(
     db.add(document)
     await db.flush()
 
+    await _index_inline(db, document, document.content or "")
     index_document_task.delay(str(document.id), content=document.content)
-    document.status = "queued"
 
     await db.commit()
     await db.refresh(document)
@@ -116,8 +135,8 @@ async def upload_document(
     db.add(document)
     await db.flush()
 
+    await _index_inline(db, document, document.content or "")
     index_document_task.delay(str(document.id), content=document.content)
-    document.status = "queued"
 
     await db.commit()
     await db.refresh(document)
@@ -190,8 +209,8 @@ async def reindex_document(
     document = await _get_scoped(db, doc_id, user)
 
     document.status = "processing"
+    await _index_inline(db, document, document.content or "")
     index_document_task.delay(str(document.id), content=document.content)
-    document.status = "queued"
 
     await db.commit()
     await db.refresh(document)

@@ -39,6 +39,7 @@ from backend.app.models import (
     metadata,
     profile,
     source,
+    tag,
     tenant,
     user,
     work_group,

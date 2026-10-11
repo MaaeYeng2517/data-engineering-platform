@@ -16,10 +16,9 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.4",
     "aiofiles>=23.2",
-    # Auth. passlib/bcrypt and PyJWT back the login and API-key paths.
+    # Auth. bcrypt and PyJWT back the login and API-key paths.
     "pyjwt>=2.8",
     "python-jose[cryptography]>=3.3",
-    "passlib[bcrypt]>=1.7",
     "bcrypt>=4.1",
     "cryptography>=42",
     # Platform services.

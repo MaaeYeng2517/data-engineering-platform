@@ -33,3 +33,5 @@ class Document(Base):
     source = relationship("Source", back_populates="documents")
     chunks = relationship("Chunk", back_populates="document")
     entities = relationship("Entity", back_populates="document")
+    tags = relationship("Tag", secondary="tag_document_association", back_populates="documents")
+    approval_workflows = relationship("ApprovalWorkflow", back_populates="document")

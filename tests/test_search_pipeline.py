@@ -16,7 +16,7 @@ from backend.app.services.indexing import (
     build_entry,
 )
 from backend.app.services.rag import ContextBuilder
-from backend.app.services.retrieval import RetrievalEngine, retrieval_engine
+from backend.app.services.retrieval import RetrievalEngine
 
 
 @pytest.fixture(autouse=True)
@@ -27,7 +27,7 @@ def fresh_index():
 
     original = indexing.hybrid_index
     indexing.hybrid_index = index
-    retrieval = RetrievalEngine()
+    retrieval = RetrievalEngine(index=index)
     try:
         yield index, retrieval
     finally:
