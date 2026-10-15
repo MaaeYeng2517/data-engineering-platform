@@ -40,7 +40,7 @@ prepares data that the application then serves.
 ```mermaid
 flowchart LR
     subgraph client["Browser / client"]
-        UI["Next.js app<br/>dashboard, marketing, chat"]
+        UI["Next.js app<br/>dashboard, blog, analytics, chat"]
     end
 
     subgraph edge["Edge"]
@@ -333,6 +333,19 @@ Four endpoints, not one parameterised route:
 `kb_ids` and `score_threshold` are accepted by the schema but not applied by the retrieval engine.
 The graph index is only reachable through `/search/graph`.
 
+The platform also exposes a public blog API and a website analytics API:
+
+| Endpoint | Handler |
+|---|---|
+| `GET /api/v1/blog` | public blog index (paginated) |
+| `GET /api/v1/blog/{slug}` | public blog post view |
+| `POST /api/v1/blog` | create a post (admin) |
+| `PUT/DELETE /api/v1/blog/{id}` | update or delete a post (admin) |
+| `POST /api/v1/track/page-view` | record a page view (public) |
+| `POST /api/v1/track/event` | record a custom analytics event (public) |
+| `POST /api/v1/subscribe` | subscribe an email (public) |
+| `GET /api/v1/stats` / `GET /api/v1/stats/visitors` | aggregate website stats (public) |
+
 ---
 
 ## 7. How RAG builds an answer
@@ -447,26 +460,39 @@ Flower gives a web view of the queue.
 
 ## 10. The frontend
 
-Next.js 14 App Router, TypeScript, Tailwind, shadcn/ui, TanStack Query, Recharts and React Flow.
+Next.js 14 App Router, TypeScript, Tailwind, shadcn/ui, TanStack Query, Recharts, React Flow,
+React Markdown (with syntax highlighting and autolinked headings) and @dnd-kit for drag-and-drop
+editing.
 
 ```mermaid
 flowchart TD
-    L["app/layout.tsx<br/>providers + theme"] --> M["app/page.tsx<br/>marketing + chat widget"]
+    L["app/layout.tsx<br/>providers + theme"] --> M["app/page.tsx<br/>blog homepage"]
     L --> AUTH["login · register"]
-    L --> DASH["(dashboard)/*<br/>16 sections"]
+    L --> BLOG["app/blog/*<br/>public index, post view, admin editor"]
+    L --> CHAT["app/chat/*<br/>public chat widget page"]
+    L --> DASH["(dashboard)/*<br/>18 sections"]
     DASH --> S1["search · rag · knowledge · documents"]
     DASH --> S2["pipelines · workflows · stacks · tools"]
     DASH --> S3["governance · audit · team · billing"]
     DASH --> S4["profiles · configuration · settings"]
+    DASH --> S5["blog admin · analytics dashboard"]
     S1 --> C1["lib/api/data.ts<br/>normalises responses to {items,total}"]
     S2 --> C1
     S3 --> C1
     S4 --> C1
+    S5 --> C1
     C1 --> C2["lib/api/client.ts<br/>axios + CSRF interceptor"]
     C2 --> C3["lib/api/chat.ts<br/>SSE stream via fetch"]
+    C2 --> C4["lib/api/blog.ts<br/>blog CRUD + public index"]
     C2 --> API["FastAPI /api/v1/*"]
     C3 --> API
+    C4 --> API
 ```
+
+The marketing home page is now a blog homepage (`BlogHomePage`) with article listings, category
+filtering, and a tech-stack section. The chat widget moved to `/chat` so the marketing nav can link
+directly to it. The widget now renders system messages (e.g. model-switch notifications) and
+supports streaming aborts with graceful fallback text.
 
 How state and errors flow:
 
@@ -653,7 +679,7 @@ knowledge-pipeline half is not, and the difference is easy to miss from the API 
 | Area | State |
 |---|---|
 | Tenants, users, sessions, CSRF, admin, work groups, profiles, billing, API keys | Backed by Postgres and the SQLAlchemy models |
-| `tenants`, `knowledge-bases`, `documents`, `workflows`, `metadata` routers | Module-level in-memory dicts, scoped by `tenant_id` for the process lifetime |
+| `tenants`, `knowledge-bases`, `documents`, `workflows`, `metadata`, `blog`, `analytics` routers | Module-level in-memory dicts, scoped by `tenant_id` for the process lifetime |
 | `chunks`, `entities`, `relationships`, `sources`, `evaluation_*`, `metadata_schemas` tables | Declared in the models, never written by any code path |
 | Indexing | `dataair.index.document` chunks, embeds and indexes — and nothing dispatches it |
 | Cross-process visibility | `hybrid_index` is a per-process singleton, and the API and worker are separate containers, so a worker-side index is invisible to the API |
@@ -664,6 +690,23 @@ knowledge-pipeline half is not, and the difference is easy to miss from the API 
 | Alembic | Declared and wired into `make migrate`, but no `alembic.ini` and no versions directory; schema comes from `init_db()` |
 | Search scoping | `kb_ids` and `score_threshold` are accepted and ignored; `search_type` does not change which indexes are consulted |
 | Result shapes | `SearchResult` requires `chunk_id`/`document_id`/`title`/`score`; the index emits `doc_id`/`hybrid_score` — empty result sets validate, non-empty ones would not |
+
+**New since the last write-up:**
+
+- **Blog** (`POST/GET /api/v1/blog`, public index + slug routes, `/api/v1/blog/{id}` CRUD under admin
+  auth) — `BlogPost` model with drafts/published/archived statuses, tag associations, featured images,
+  and read-time estimation. Seeded on startup via `seed_default_posts`.
+- **Analytics** (`/api/v1/analytics`, `/api/v1/track`, `/api/v1/visitor`, `/api/v1/subscribe`,
+  `/api/v1/stats`) — `Visitor`, `PageView`, `AnalyticsEvent`, `Subscriber`, `UsageEvent` models,
+  all tenant-scoped. Tracks visitors, page views, UTM params, custom events, and email subscribers.
+  The frontend blog and chat pages emit tracking events through the public `/track` endpoint.
+- **Celery resilience** — the worker module now degrades gracefully when Celery is not installed:
+  `celery_app` becomes `None`, tasks are wrapped in a `_maybe_task` decorator that no-ops the
+  `@celery_app.task` decoration, and the `index_document_task` call site in the upload endpoint
+  checks `hasattr(index_document_task, "delay")` before dispatching. This lets the API start and
+  serve requests without a running queue.
+- **Database** — `connect_args={"statement_cache_size": 0}` added to the async engine to avoid
+  asyncpg statement-cache warnings under certain pool configurations.
 
 Read that table before estimating work on anything in the search or RAG path.
 
@@ -677,7 +720,7 @@ backend/          FastAPI app — routers, models, services, workers, telemetry
   app/models/     SQLAlchemy models
   app/services/   indexing, retrieval, rag, llm, processing, embeddings, governance, platform
   app/workers/    Celery app, tasks, beat schedule
-frontend/         Next.js app — marketing, dashboard, chat widget
+frontend/         Next.js app — blog homepage, dashboard, chat widget, blog admin
 dags/             Airflow DAGs: MinIO landing, dbt build, quality gate, catalog sync
 dbt/              staging views and incremental marts
 quality/          Great Expectations suite and checkpoint

@@ -1,0 +1,87 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: dataair-backend
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/ingress-status: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "10"
+        run.googleapis.com/cpu-throttling: "true"
+        run.googleapis.com/memory: "1Gi"
+        run.googleapis.com/cpu: "1000m"
+        run.googleapis.com/startup-cpu-boost: "true"
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      serviceAccountName: dataair-backend@YOUR_PROJECT.iam.gserviceaccount.com
+      containers:
+        - name: dataair-backend
+          image: REGION-docker.pkg.dev/YOUR_PROJECT/dataair/backend:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: APP_ENV
+              value: "production"
+            - name: DEBUG
+              value: "false"
+            - name: APP_NAME
+              value: "DataAir"
+            - name: APP_VERSION
+              value: "1.0.0"
+            - name: LLM_PROVIDER
+              value: "google"
+            - name: GOOGLE_API_KEY
+              value: "AIzaSyDuqhE_jPWaznJPvjfLFstEChpJsFg3pmQ"
+            - name: GEMINI_MODEL
+              value: "gemini-3.8-flash"
+            - name: LLM_OFFLINE_FALLBACK
+              value: "true"
+            - name: LLM_REQUEST_TIMEOUT
+              value: "60"
+            - name: FRONTEND_URL
+              value: "https://maaelab-data-air.vercel.app"
+            - name: PUBLIC_BASE_URL
+              value: "https://maaelab-data-air.vercel.app"
+            - name: ALLOWED_ORIGINS
+              value: "https://maaelab-data-air.vercel.app"
+            - name: COOKIE_SECURE
+              value: "true"
+            - name: COOKIE_SAMESITE
+              value: "lax"
+            # These must be set via Cloud Console or gcloud (secrets):
+            # - name: JWT_SECRET_KEY
+            # - name: CSRF_SECRET_KEY
+            # - name: API_KEY_HMAC_SECRET
+            # - name: PROFILE_SECRET_KEY
+            # - name: ADMIN_EMAILS
+            # - name: DATABASE_URL
+            # - name: REDIS_URL
+            # - name: MINIO_ENDPOINT
+            # - name: MINIO_ROOT_USER
+            # - name: MINIO_ROOT_PASSWORD
+            # - name: MINIO_BUCKET
+            # - name: ELASTICSEARCH_URL
+            # - name: QDRANT_URL
+          resources:
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30

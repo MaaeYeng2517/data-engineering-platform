@@ -44,3 +44,8 @@ class User(Base):
     governance_policies = relationship("GovernancePolicy", back_populates="creator")
     created_approvals = relationship("ApprovalWorkflow", foreign_keys="ApprovalWorkflow.creator_id", back_populates="creator")
     decided_approvals = relationship("ApprovalWorkflow", foreign_keys="ApprovalWorkflow.decided_by", back_populates="decider")
+    blog_posts = relationship("BlogPost", back_populates="author", cascade="all, delete-orphan")
+    visitors = relationship("Visitor", back_populates="user")
+    page_views = relationship("PageView", back_populates="user")
+    analytics_events = relationship("AnalyticsEvent", back_populates="user")
+    usage_events = relationship("UsageEvent", back_populates="user")

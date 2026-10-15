@@ -870,3 +870,166 @@ class ProfileResolvedResponse(BaseModel):
 
 
 ProfileDetailResponse.model_rebuild()
+
+
+# ---------------------------------------------------------------------------
+# Blog posts
+# ---------------------------------------------------------------------------
+
+class BlogPostCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    slug: Optional[str] = Field(None, max_length=255)
+    excerpt: Optional[str] = None
+    content: str = Field(min_length=1)
+    featured_image_url: Optional[str] = Field(None, max_length=500)
+    category: str = Field("AI", max_length=50)
+    read_time: int = Field(5, ge=1, le=60)
+    tag_ids: List[UUID] = Field(default_factory=list)
+
+
+class BlogPostUpdate(BaseModel):
+    title: Optional[str] = Field(None, min_length=1, max_length=255)
+    slug: Optional[str] = Field(None, max_length=255)
+    excerpt: Optional[str] = None
+    content: Optional[str] = None
+    featured_image_url: Optional[str] = Field(None, max_length=500)
+    category: Optional[str] = Field(None, max_length=50)
+    read_time: Optional[int] = Field(None, ge=1, le=60)
+    tag_ids: Optional[List[UUID]] = None
+
+
+class BlogPostResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    author_id: UUID
+    tenant_id: UUID
+    title: str
+    slug: str
+    excerpt: Optional[str]
+    content: str
+    featured_image_url: Optional[str]
+    category: str
+    read_time: int
+    view_count: int
+    is_published: bool
+    status: str
+    published_at: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime
+    author_name: Optional[str] = None
+    tag_ids: List[UUID] = Field(default_factory=list)
+    tag_names: List[str] = Field(default_factory=list)
+
+
+class BlogPostListResponse(BaseModel):
+    """Paginated listing payload for the public blog index."""
+
+    posts: List[BlogPostResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+# Website Analytics schemas
+class PageViewCreate(BaseModel):
+    session_id: Optional[str] = None
+    visitor_id: Optional[UUID] = None
+    path: str = Field(min_length=1, max_length=500)
+    referrer: Optional[str] = Field(None, max_length=500)
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_term: Optional[str] = None
+    utm_content: Optional[str] = None
+    duration_ms: Optional[int] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    tenant_id: Optional[UUID] = None
+
+
+class VisitorTrackResponse(BaseModel):
+    visitor_id: UUID
+    session_id: str
+    page_view_id: UUID
+
+
+class AnalyticsEventCreate(BaseModel):
+    visitor_id: Optional[UUID] = None
+    session_id: Optional[str] = None
+    user_id: Optional[UUID] = None
+    tenant_id: Optional[UUID] = None
+    event_type: str = Field(min_length=1, max_length=50)
+    section: Optional[str] = None
+    feature: Optional[str] = None
+    action: Optional[str] = None
+    path: Optional[str] = Field(None, max_length=500)
+    label: Optional[str] = None
+    value: Optional[int] = None
+    properties: Dict[str, Any] = Field(default_factory=dict)
+    referrer: Optional[str] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    duration_ms: Optional[int] = None
+
+
+class TrackEventResponse(BaseModel):
+    event_id: UUID
+    success: bool = True
+
+
+class SubscriberCreate(BaseModel):
+    email: EmailStr
+    name: Optional[str] = Field(None, max_length=255)
+    source: Optional[str] = None
+    referrer: Optional[str] = None
+    landing_page: Optional[str] = None
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: EmailStr) -> str:
+        return str(value).strip().lower()
+
+
+class SubscriberResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    email: str
+    name: Optional[str]
+    status: str
+    source: Optional[str]
+    created_at: datetime
+
+
+class WebsiteStatsResponse(BaseModel):
+    period_days: int
+    total_visitors: int
+    total_page_views: int
+    total_subscribers: int
+    total_users: int
+    daily_visitors: List[Dict[str, Any]]
+    daily_page_views: List[Dict[str, Any]]
+    daily_subscribers: List[Dict[str, Any]]
+    top_pages: List[Dict[str, Any]]
+    referrers: List[Dict[str, Any]]
+    devices: List[Dict[str, Any]]
+    browsers: List[Dict[str, Any]]
+    countries: List[Dict[str, Any]]
+    events_by_type: List[Dict[str, Any]]
+    section_usage: List[Dict[str, Any]]
+
+
+class AnalyticsOverviewResponse(BaseModel):
+    today_visitors: int
+    today_page_views: int
+    yesterday_visitors: int
+    yesterday_page_views: int
+    active_sessions: int
+
+
+class SubscriberStatsResponse(BaseModel):
+    total: int
+    active: int
+    unsubscribed: int
+    bounced: int

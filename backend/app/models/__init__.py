@@ -1,6 +1,15 @@
 """SQLAlchemy models for the platform."""
 from backend.app.models.api_key import ApiKey, ApiKeyScope, ApiUsageLog
 from backend.app.models.billing import MembershipPlan, Subscription, SubscriptionStatus
+from backend.app.models.blog_post import BlogPost, STATUS_DRAFT, STATUS_PUBLISHED, STATUS_ARCHIVED
+from backend.app.models.analytics import (
+    AnalyticsEvent,
+    PageView,
+    Subscriber,
+    SubscriberStatus,
+    UsageEvent,
+    Visitor,
+)
 from backend.app.models.chunk import Chunk
 from backend.app.models.contact import ContactMessage, ContactStatus
 from backend.app.models.document import Document
@@ -33,6 +42,7 @@ __all__ = [
     "ApiUsageLog",
     "ApprovalWorkflow",
     "AuthType",
+    "BlogPost",
     "Chunk",
     "CloudProvider",
     "ContactMessage",
@@ -64,4 +74,10 @@ __all__ = [
     "WorkGroupMember",
     "WorkGroupRole",
     "Workflow",
+    "AnalyticsEvent",
+        "PageView",
+    "Subscriber",
+    "SubscriberStatus",
+    "UsageEvent",
+    "Visitor",
 ]

@@ -16,6 +16,7 @@ from backend.app.api import (
     system,
     tenants,
     workflows,
+    analytics,
 )
 
 __all__ = [
@@ -35,4 +36,5 @@ __all__ = [
     "system",
     "tenants",
     "workflows",
+    "analytics",
 ]

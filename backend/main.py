@@ -16,6 +16,7 @@ from backend.app.api import (
     api_keys,
     auth,
     billing,
+    blog,
     chat,
     connectors,
     contact,
@@ -32,6 +33,7 @@ from backend.app.api import (
     tenants,
     work_groups,
     workflows,
+    analytics,
 )
 from backend.app.dependencies import require_platform_user
 from backend.app.models.api_key import ApiUsageLog
@@ -51,26 +53,47 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with async_session_factory() as db:
-        await init_db()
-        # The search index is per-process state; rebuild it from the stored
-        # chunks so a restart does not serve an empty index.
-        indexed = await rehydrate_index(db)
+    try:
+        async with async_session_factory() as db:
+            await init_db()
+            # The search index is per-process state; rebuild it from the stored
+            # chunks so a restart does not serve an empty index.
+            indexed = await rehydrate_index(db)
+        logger.info("Database initialized, %d chunks rehydrated into the index", indexed)
+    except Exception as exc:
+        logger.warning("Startup DB initialization skipped: %s", exc)
 
-    validate_production_config()
+    try:
+        validate_production_config()
+    except Exception as exc:
+        logger.warning("Production config validation skipped: %s", exc)
 
-    from backend.app.api.billing import seed_default_plans
-    from backend.app.models.tenant import Tenant
+    try:
+        from backend.app.api.billing import seed_default_plans
+        from backend.app.models.tenant import Tenant
 
-    async with async_session_factory() as db:
-        tenants = (await db.execute(select(Tenant).where(Tenant.is_active.is_(True)))).scalars().all()
-        for tenant in tenants:
-            await seed_default_plans(db, tenant.id)
-    logger.info("Database initialized, %d chunks rehydrated into the index", indexed)
+        async with async_session_factory() as db:
+            tenants = (await db.execute(select(Tenant).where(Tenant.is_active.is_(True)))).scalars().all()
+            for tenant in tenants:
+                await seed_default_plans(db, tenant.id)
+    except Exception as exc:
+        logger.warning("Seed plans skipped: %s", exc)
+
+    try:
+        from backend.app.api.blog import seed_default_posts
+
+        async with async_session_factory() as db:
+            await seed_default_posts(db)
+    except Exception as exc:
+        logger.warning("Seed blog posts skipped: %s", exc)
+
     try:
         yield
     finally:
-        shutdown_telemetry()
+        try:
+            shutdown_telemetry()
+        except Exception:
+            pass
 
 
 app = FastAPI(
@@ -204,6 +227,7 @@ app.include_router(documents.router, prefix="/api/v1/documents", tags=["Document
 app.include_router(search.router, prefix="/api/v1/search", tags=["Search"], dependencies=[Depends(require_platform_user)])
 app.include_router(rag.router, prefix="/api/v1/rag", tags=["RAG"], dependencies=[Depends(require_platform_user)])
 app.include_router(workflows.router, prefix="/api/v1/workflows", tags=["Workflows"], dependencies=[Depends(require_platform_user)])
+app.include_router(analytics.router, prefix="/api/v1", tags=["Analytics"])
 app.include_router(metadata.router, prefix="/api/v1/metadata", tags=["Metadata"], dependencies=[Depends(require_platform_user)])
 app.include_router(evaluation.router, prefix="/api/v1/evaluation", tags=["Evaluation"], dependencies=[Depends(require_platform_user)])
 app.include_router(governance.router, prefix="/api/v1/governance", tags=["Governance"], dependencies=[Depends(require_platform_user)])
@@ -212,6 +236,8 @@ app.include_router(connectors.public_router, prefix="/api/v1/connectors", tags=[
 app.include_router(profiles.router, prefix="/api/v1/profiles", tags=["Profiles"], dependencies=[Depends(require_platform_user)])
 app.include_router(platform.router, prefix="/api/v1", tags=["Platform"], dependencies=[Depends(require_platform_user)])
 app.include_router(system.router, prefix="/api/v1", tags=["System"])
+app.include_router(blog.router, prefix="/api/v1/blog", tags=["Blog"], dependencies=[Depends(require_platform_user)])
+app.include_router(blog.public_router, prefix="/api/v1/blog", tags=["Blog"])
 
 
 if __name__ == "__main__":

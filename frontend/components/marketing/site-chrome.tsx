@@ -7,15 +7,11 @@ import { ArrowRight, Database, Menu, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 const navLinks = [
+  { title: 'Articles', href: '/#articles' },
+  { title: 'Categories', href: '/#categories' },
+  { title: 'Tech Stack', href: '/#tech-stack' },
   { title: 'Documents', href: '/documents' },
-  { title: 'AI Agent Chat', href: '/#chat' },
-  { title: 'Platform', href: '/#platform' },
-  { title: 'Capabilities', href: '/#capabilities' },
-  { title: 'Workspace', href: '/#pages' },
-  { title: 'Processing', href: '/#processing' },
-  { title: 'Architecture', href: '/#architecture' },
-  { title: 'Pricing', href: '/#pricing' },
-  { title: 'FAQ', href: '/#faq' },
+  { title: 'AI Agent Chat', href: '/chat' },
 ]
 
 export function SiteHeader() {
@@ -96,11 +92,14 @@ export function SiteFooter() {
           Enterprise data operating and intelligence platform.
         </p>
         <div className="flex gap-4 text-sm text-muted-foreground">
-          <Link href="#pricing" className="hover:text-foreground">
-            Pricing
+          <Link href="/#articles" className="hover:text-foreground">
+            Articles
           </Link>
-          <Link href="#pages" className="hover:text-foreground">
-            Workspace
+          <Link href="/#categories" className="hover:text-foreground">
+            Categories
+          </Link>
+          <Link href="/#tech-stack" className="hover:text-foreground">
+            Tech Stack
           </Link>
           <Link href="/register" className="hover:text-foreground">
             Create account

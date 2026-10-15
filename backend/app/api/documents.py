@@ -14,8 +14,12 @@ from backend.app.models.knowledge_base import KnowledgeBase
 from backend.app.models.user import User
 from backend.app.schemas import DocumentCreate, DocumentResponse
 from backend.app.services.indexing.pipeline import index_document, remove_document
-from backend.app.workers.tasks import index_document_task
 from backend.database import get_db
+
+try:
+    from backend.app.workers.tasks import index_document_task
+except ImportError:
+    index_document_task = None  # type: ignore[assignment,misc]
 
 router = APIRouter()
 
@@ -92,7 +96,8 @@ async def create_document(
     await db.flush()
 
     await _index_inline(db, document, document.content or "")
-    index_document_task.delay(str(document.id), content=document.content)
+    if index_document_task is not None and hasattr(index_document_task, "delay"):
+        index_document_task.delay(str(document.id), content=document.content)
 
     await db.commit()
     await db.refresh(document)
@@ -136,7 +141,8 @@ async def upload_document(
     await db.flush()
 
     await _index_inline(db, document, document.content or "")
-    index_document_task.delay(str(document.id), content=document.content)
+    if index_document_task is not None and hasattr(index_document_task, "delay"):
+        index_document_task.delay(str(document.id), content=document.content)
 
     await db.commit()
     await db.refresh(document)
@@ -210,7 +216,8 @@ async def reindex_document(
 
     document.status = "processing"
     await _index_inline(db, document, document.content or "")
-    index_document_task.delay(str(document.id), content=document.content)
+    if index_document_task is not None and hasattr(index_document_task, "delay"):
+        index_document_task.delay(str(document.id), content=document.content)
 
     await db.commit()
     await db.refresh(document)

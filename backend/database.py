@@ -19,6 +19,7 @@ engine = create_async_engine(
     pool_size=DATABASE_POOL_SIZE,
     max_overflow=DATABASE_MAX_OVERFLOW,
     pool_pre_ping=True,
+    connect_args={"statement_cache_size": 0},
 )
 
 async_session_factory = async_sessionmaker(
@@ -30,6 +31,7 @@ async_session_factory = async_sessionmaker(
 from backend.app.models import (
     api_key,
     billing,
+    blog_post,
     chunk,
     contact,
     document,

@@ -15,6 +15,7 @@ import {
   Trash2,
   TriangleAlert,
   User,
+  Settings,
 } from 'lucide-react'
 
 import {
@@ -50,6 +51,7 @@ interface RenderedMessage extends ChatTurn {
   latencyMs?: number
   pending?: boolean
   failed?: boolean
+  isSystem?: boolean
 }
 
 const suggestions = [
@@ -209,6 +211,7 @@ export function ChatWidget({ kbIds = [] }: { kbIds?: string[] }) {
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [lastSelectedTarget, setLastSelectedTarget] = useState<string>(AUTO_VALUE)
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
@@ -243,6 +246,23 @@ export function ChatWidget({ kbIds = [] }: { kbIds?: string[] }) {
     const [provider, model] = target.split('::')
     return { provider, model }
   }, [target])
+
+  // Send a system message when model selection changes
+  useEffect(() => {
+    if (target !== lastSelectedTarget && !providersLoading) {
+      const option = options.find(o => o.value === target)
+      const label = option ? option.label : target
+      const systemMessage: RenderedMessage = {
+        id: nextId('assistant'),
+        role: 'assistant',
+        content: `🔧 Switched to **${label}**`,
+        pending: false,
+        isSystem: true,
+      }
+      setMessages(prev => [...prev, systemMessage])
+      setLastSelectedTarget(target)
+    }
+  }, [target, lastSelectedTarget, options, providersLoading])
 
   const patchLastAssistant = useCallback((patch: Partial<RenderedMessage>) => {
     setMessages((current) => {
@@ -352,11 +372,11 @@ export function ChatWidget({ kbIds = [] }: { kbIds?: string[] }) {
     [appendDelta, busy, kbIds, messages, patchLastAssistant, selected],
   )
 
-  function stop() {
+  const stop = () => {
     abortRef.current?.abort()
   }
 
-  function reset() {
+  const reset = () => {
     abortRef.current?.abort()
     setMessages([])
     setError(null)
@@ -445,28 +465,41 @@ export function ChatWidget({ kbIds = [] }: { kbIds?: string[] }) {
             </div>
           </div>
         ) : (
-          messages.map((message) => (
-            <div
-              key={message.id}
-              className={message.role === 'user' ? 'flex justify-end' : 'flex justify-start'}
-            >
-              <div
-                className={
-                  message.role === 'user'
-                    ? 'max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground'
-                    : 'max-w-[90%] space-y-2 rounded-2xl rounded-bl-sm bg-muted px-4 py-2.5 text-sm'
-                }
-              >
-                <div className="flex items-center gap-1.5 text-xs font-medium opacity-70">
-                  {message.role === 'user' ? (
-                    <User className="h-3 w-3" />
-                  ) : (
-                    <Bot className="h-3 w-3" />
-                  )}
-                  <span>{message.role === 'user' ? 'You' : 'Assistant'}</span>
+          messages.map((message) => {
+            if (message.isSystem) {
+              return (
+                <div className="flex justify-center" key={message.id}>
+                  <div className="max-w-[90%] rounded-2xl bg-muted/50 px-4 py-2 text-sm text-center text-muted-foreground">
+                    <div className="flex items-center justify-center gap-1.5">
+                      <Settings className="h-3 w-3" />
+                      <span>{message.content}</span>
+                    </div>
+                  </div>
                 </div>
+              )
+            }
+            return (
+              <div
+                key={message.id}
+                className={message.role === 'user' ? 'flex justify-end' : 'flex justify-start'}
+              >
+                <div
+                  className={
+                    message.role === 'user'
+                      ? 'max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground'
+                      : 'max-w-[90%] space-y-2 rounded-2xl rounded-bl-sm bg-muted px-4 py-2.5 text-sm'
+                  }
+                >
+                  <div className="flex items-center gap-1.5 text-xs font-medium opacity-70">
+                    {message.role === 'user' ? (
+                      <User className="h-3 w-3" />
+                    ) : (
+                      <Bot className="h-3 w-3" />
+                    )}
+                    <span>{message.role === 'user' ? 'You' : 'Assistant'}</span>
+                  </div>
 
-                 {message.role === 'assistant' ? (
+                  {message.role === 'assistant' ? (
                    <ReactMarkdown
                      remarkPlugins={[remarkGfm]}
                      components={{
@@ -515,7 +548,8 @@ export function ChatWidget({ kbIds = [] }: { kbIds?: string[] }) {
                 )}
               </div>
             </div>
-          ))
+          )
+          })
         )}
       </div>
 

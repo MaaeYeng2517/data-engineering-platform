@@ -39,3 +39,6 @@ frontend/tsconfig.tsbuildinfo
 # Local scratch files
 cookies.txt
 test-doc.txt
+.vercel
+*.bak
+*.tmp

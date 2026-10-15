@@ -22,6 +22,7 @@ class Tag(Base):
     kbs = relationship("KnowledgeBase", secondary="tag_kb_association", back_populates="tags")
     documents = relationship("Document", secondary="tag_document_association", back_populates="tags")
     sources = relationship("Source", secondary="tag_source_association", back_populates="tags")
+    blog_posts = relationship("BlogPost", secondary="blog_post_tag_association", back_populates="tags")
 
     def __repr__(self):
         return f"<Tag {self.name}>"

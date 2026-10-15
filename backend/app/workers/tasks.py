@@ -23,6 +23,13 @@ from backend.database import async_session_factory
 logger = logging.getLogger(__name__)
 
 
+def _maybe_task(func):
+    """Apply the celery decorator when celery is available; otherwise return the function unchanged."""
+    if celery_app is not None:
+        return celery_app.task(name=func.__name__.replace("_", "."), bind=True)(func)
+    return func
+
+
 def run_async(coro):
     """Run a coroutine from Celery's synchronous task context."""
     return asyncio.run(coro)
@@ -49,9 +56,9 @@ async def _rehydrate() -> int:
         return await rehydrate_index(db)
 
 
-@celery_app.task(name="dataair.index.document", bind=True, max_retries=3)
+@_maybe_task
 def index_document_task(
-    self,
+    self_,
     doc_id: str,
     content: str | None = None,
     metadata: Dict[str, Any] | None = None,
@@ -67,8 +74,12 @@ def index_document_task(
     return result
 
 
-@celery_app.task(name="dataair.index.query", bind=True)
-def search_index(self, query: str, limit: int = 10) -> Dict[str, Any]:
+@_maybe_task
+def search_index(
+    self_,
+    query: str,
+    limit: int = 10,
+) -> Dict[str, Any]:
     """Run a hybrid search against this process's index, hydrating it first."""
     if len(hybrid_index) == 0:
         run_async(_rehydrate())
@@ -77,27 +88,38 @@ def search_index(self, query: str, limit: int = 10) -> Dict[str, Any]:
     return {"query": query, "results": results, "total": len(results)}
 
 
-@celery_app.task(name="dataair.index.embed", bind=True)
-def embed_texts(self, texts: list[str]) -> Dict[str, Any]:
+@_maybe_task
+def embed_texts(
+    self_,
+    texts: list[str],
+) -> Dict[str, Any]:
     """Expose the embedding service to Celery callers."""
     vectors = embedding_service.embed(texts)
     return {"count": len(vectors), "vector_size": embedding_service.vector_size}
 
 
-@celery_app.task(name="dataair.ingest.document", bind=True, max_retries=2)
+@_maybe_task
 def ingest_document(
-    self,
+    self_,
     doc_id: str,
     content: str | None = None,
     metadata: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Ingest raw content then hand off to indexing."""
-    return index_document_task.apply_async(
-        kwargs={"doc_id": doc_id, "content": content, "metadata": metadata}
-    ).get()
+    if celery_app is not None:
+        result = index_document_task.apply_async(
+            kwargs={"doc_id": doc_id, "content": content, "metadata": metadata}
+        ).get()
+    else:
+        result = index_document_task(
+            doc_id, content=content, metadata=metadata
+        )
+    return result
 
 
-@celery_app.task(name="dataair.ingest.uuid")
-def new_document_id() -> str:
+@_maybe_task
+def new_document_id(
+    self_,
+) -> str:
     """Generate an identifier for a new document."""
     return str(uuid.uuid4())
