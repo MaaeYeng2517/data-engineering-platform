@@ -201,3 +201,121 @@ flowchart TB
     
     W8 --> R2
 ```
+
+## 21. Tool Connectivity & Data Flow Diagram
+
+### Complete System Integration Map
+
+```mermaid
+flowchart LR
+    subgraph "External"
+        EXT[External Files/URLs]
+        LLM_API[LLM Providers<br/>OpenAI/Anthropic/Google/Ollama]
+    end
+    
+    subgraph "Frontend"
+        UI[Next.js App Router]
+        CHAT_W[Chat Widget + SSE]
+        BLOG_UI[Blog Pages + Admin]
+        DASH[Dashboard/Analytics]
+    end
+    
+    subgraph "API Gateway"
+        API[FastAPI Backend]
+        MW[Middleware<br/>CORS/CSRF/JWT/RateLimit]
+        AUTH[Auth<br/>Sessions/API Keys]
+    end
+    
+    subgraph "Core Services"
+        DOC[Document Service]
+        SRCH[Search/Retrieval Engine]
+        RAG_S[RAG Engine]
+        CHAT_S[Chat Gateway]
+        BLOG_S[Blog Service]
+        ANA_S[Analytics Service]
+        GOV[Governance/Profiles]
+    end
+    
+    subgraph "Data Stores"
+        PG[(PostgreSQL<br/>+pgvector)]
+        RD[(Redis)]
+        MIN[(MinIO S3)]
+        QD[(Qdrant)]
+        ES[(Elasticsearch)]
+    end
+    
+    subgraph "Processing"
+        CEL[Celery Workers<br/>queues: default/indexing/ingestion]
+        FLW[Flower]
+    end
+    
+    subgraph "Data Platform"
+        AF[Airflow<br/>Scheduler/Web/Triggerer]
+        DBT[dbt Core]
+        GE[Great Expectations]
+        OM[OpenMetadata]
+    end
+    
+    subgraph "Observability"
+        PROM[Prometheus]
+        GRAF[Grafana]
+    end
+    
+    %% Connections
+    EXT --> UI
+    UI <-->|HTTP/REST + SSE| NGINX[Nginx:80] --> API
+    NGINX --> UI
+    
+    API --> MW --> AUTH
+    AUTH --> DOC & SRCH & RAG_S & CHAT_S & BLOG_S & ANA_S & GOV
+    
+    DOC -->|store chunks/content| PG
+    DOC -->|enqueue| CEL
+    CEL -->|index/embed| SRCH
+    
+    SRCH -->|vector search| PG & QD
+    SRCH -->|keyword| ES
+    SRCH -->|cache| RD
+    SRCH -->|hybrid merge+rerank| RAG_S
+    
+    RAG_S -->|context build| CHAT_S
+    CHAT_S -->|provider chain| LLM_API
+    ANA_S -->|events/views/subs| PG
+    BLOG_S -->|posts/tags| PG
+    
+    CEL <-->|broker/results| RD
+    FLW --> CEL
+    DOC -->|objects| MIN
+    
+    MIN --> AF
+    AF --> DBT & GE & OM
+    DBT --> PG
+    GE --> PG
+    OM --> PG
+    
+    API & CEL & AF --> PROM
+    PROM --> GRAF
+```
+
+### Data Flow Description
+
+1. **User Input → API**: Browser requests flow through Nginx to FastAPI with CORS/CSRF/JWT/API-key middleware enforcing auth and rate limits.
+2. **Application Services → Storage**: Documents stored in PostgreSQL; objects in MinIO; embeddings/indexes in PG (pgvector), Qdrant, Elasticsearch; state/cache in Redis.
+3. **Async Processing**: Heavy work (chunking/embedding/reindexing) enqueued to Celery workers (indexing/ingestion queues); Flower monitors.
+4. **AI Path**: Search merges vector+keyword (hybrid) with reranking → ContextBuilder builds bounded context → LLM Gateway tries provider chain with offline fallback → SSE streams back.
+5. **Platform Pipelines**: Airflow ingests from MinIO, triggers dbt transforms, runs GE quality checks, syncs metadata to OpenMetadata; all results persisted to Postgres for API consumption.
+6. **Analytics/Content**: Public blog and analytics write/read tenant-scoped data; frontend dashboards visualize via API.
+7. **Observability**: Prometheus scrapes metrics from API/workers/Airflow; Grafana visualizes.
+
+### Integration Points Summary
+
+| Integration | Direction | Protocol | Purpose |
+|---|---|---|---|
+| Browser ↔ Nginx/Frontend/API | Bidirectional | HTTP/HTTPS, SSE | UI, auth, chat streaming |
+| API ↔ PostgreSQL | Read/Write | SQL (asyncpg) | Core data, vectors (pgvector), blog, analytics |
+| API/Workers ↔ Redis | Read/Write | RESP | Broker, cache, rate limiting |
+| API/Workers ↔ MinIO | Read/Write | S3 API | Object/file storage |
+| Workers ↔ Qdrant/ES | Read/Write | HTTP | Vector/keyword indexes (secondary) |
+| API ↔ LLM Providers | Request/Response (stream) | HTTP | Chat/RAG generation |
+| Airflow ↔ MinIO/DB/OM/GE/dbt | Orchestrated | Various | ETL, QA, catalog, transforms |
+| All → Prometheus/Grafana | Metrics | HTTP scrape | Observability |
