@@ -1,5 +1,7 @@
 # DataAir
 
+> 🌐 Live Demo: [https://maaelab-data-air.vercel.app/](https://maaelab-data-air.vercel.app/)
+
 Enterprise Data Operating & Intelligence Platform — manages the complete data lifecycle from ingestion to AI agents.
 
 ## Features
@@ -61,3 +63,102 @@ cd frontend && npm run lint && npm run typecheck && npm test
 ## License
 
 See LICENSE.
+
+## End-to-End System Flow
+
+This diagram shows the complete journey from user interaction through document processing, indexing, search/RAG, and supporting data pipelines.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User (Browser)
+    participant N as Nginx (:80)
+    participant FE as Next.js (:3000)
+    participant BE as FastAPI (:8000)
+    participant DB as PostgreSQL
+    participant R as Redis
+    participant M as MinIO
+    participant CW as Celery Worker
+    participant IDX as Hybrid Index (In-Process)
+    participant LLM as LLM Gateway
+    participant AF as Airflow
+    participant DBT as dbt
+    participant GE as Great Expectations
+    participant OM as OpenMetadata
+
+    %% Authentication & UI
+    U->>N: Access app
+    N->>FE: Serve UI
+    FE->>BE: Auth (JWT/CSRF) or public requests
+    
+    %% Document Upload & Ingestion
+    U->>FE: Upload document
+    FE->>BE: POST /documents/upload (multipart)
+    BE->>DB: Create document record (status: processing)
+    BE->>BE: Extract → Clean → Chunk (800/100 chars)
+    BE->>DB: Store content/chunks/metadata
+    alt Celery available
+        BE-->>CW: Enqueue index_document_task(doc_id)
+        CW->>BE: Fetch content
+        CW->>CW: TokenChunker (300/50) → Embed
+        CW->>IDX: Update vector/keyword indexes
+        CW->>DB: Update document status (indexed)
+    else Celery unavailable
+        BE->>BE: _index_inline() → embed → index
+        BE->>DB: Update status
+    end
+
+    %% Search
+    U->>FE: Search query
+    FE->>BE: POST /api/v1/search/
+    BE->>IDX: Hybrid search (vec+kw, weights 0.6/0.4)
+    BE->>BE: Rerank (overlap/pos/len)
+    BE->>FE: Return ranked results with scores
+
+    %% RAG
+    U->>FE: Ask question (RAG)
+    FE->>BE: POST /api/v1/rag/
+    BE->>IDX: Retrieve top-k passages
+    BE->>BE: ContextBuilder (dedupe→compress→budget 4000 tokens)
+    BE->>LLM: Generate with numbered passages
+    alt Provider succeeds
+        LLM-->>BE: Answer + usage
+    else All providers fail
+        BE->>BE: Extractive fallback (quote passages)
+    end
+    BE->>FE: Answer + citations + sources
+
+    %% Chat Streaming (Public)
+    U->>FE: Chat publicly
+    FE->>BE: POST /api/v1/chat/stream (SSE)
+    BE->>BE: Ground context (≤6000 chars)
+    BE->>LLM: Stream via provider chain
+    LLM-->>BE: meta → deltas → done
+    BE-->>FE: SSE frames
+
+    %% Analytics & Blog
+    FE->>BE: POST /track/page-view or /track/event (public)
+    BE->>DB: Store Visitor/PageView/Event/Subscriber
+    U->>FE: Browse /blog or /blog/[slug]
+    FE->>BE: GET /api/v1/blog (public)
+
+    %% Data Pipelines (Scheduled)
+    AF->>M: Scan landing bucket (*/30)
+    AF->>DBT: Build warehouse (02:00)
+    AF->>GE: Data quality checks (03:30)
+    AF->>OM: Catalog sync (04:00)
+    DBT->>DB: Write staging/marts
+    GE->>DB: Write quality audit
+    OM->>DB: Update catalog/lineage
+```
+
+### Step-by-Step Explanation
+
+1. **Access**: User hits site via Nginx; Next.js serves UI with auth via JWT/CSRF cookies.
+2. **Upload**: Document uploaded → extracted/cleaned/chunked (char-level) → persisted to PostgreSQL.
+3. **Indexing**: Celery worker (or inline fallback) tokenizes (300/50), embeds chunks, builds hybrid index (vector + keyword). Status tracked in DB.
+4. **Search**: Hybrid retrieval merges scores (0.6 vector cosine + 0.4 keyword TF), reranks by overlap/position/length.
+5. **RAG**: Top passages assembled with token budget, sent to LLM Gateway with citations instruction; degrades gracefully if no provider available.
+6. **Chat**: Public SSE streaming with provider chain fallback; emits structured frames (meta/delta/done/error).
+7. **Analytics/Blog**: Public endpoints track visitors/events/subscribers; blog serves published posts.
+8. **Pipelines**: Airflow orchestrates MinIO ingestion → dbt transforms → GE validates → OM syncs catalog/lineage; all pipeline data lands in Postgres and is exposed via API/dashboard.
