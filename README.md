@@ -15,16 +15,42 @@ Enterprise Data Operating & Intelligence Platform — manages the complete data 
 
 ## Tech Stack
 
-Apache Airflow, dbt, FastAPI, PostgreSQL, Redis, Elasticsearch, Qdrant, MinIO, OpenMetadata, Next.js, React, Tailwind CSS.
+- **Backend:** FastAPI, SQLAlchemy 2.0, Pydantic v2, Alembic
+- **Frontend:** Next.js 14 (App Router), TypeScript, Tailwind CSS, shadcn/ui, TanStack Query, Recharts, React Flow
+- **Database:** PostgreSQL 16 + pgvector
+- **Search:** Hybrid (vector + keyword), Qdrant, Elasticsearch
+- **Cache/Broker:** Redis, Celery + Flower
+- **Storage:** MinIO (S3-compatible)
+- **Orchestration:** Apache Airflow 2.x, dbt Core, Great Expectations
+- **Catalog/Lineage:** OpenMetadata
+- **AI/LLM:** OpenAI, Anthropic, Google Gemini, Ollama (multi-provider gateway with offline fallback)
+- **Observability:** Prometheus, Grafana, OpenTelemetry (optional)
+- **Content/Analytics:** React Markdown ecosystem, custom analytics API
 
 ## Quick Start
 
+### Using Docker Compose (Recommended)
 ```bash
+cp .env.example .env  # configure as needed
 docker compose up -d
-cd frontend && npm install && npm run dev
 ```
 
-Frontend: http://localhost:3000 · Backend: http://localhost:8000
+### Or run frontend/backend separately
+```bash
+# Backend
+cd backend
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+
+# Frontend
+cd frontend
+npm install
+npm run dev
+```
+
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000 (docs at /docs)
+- API Health: http://localhost:8000/health
 
 ## Tests
 
