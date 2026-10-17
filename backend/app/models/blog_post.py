@@ -7,6 +7,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Table,
     Text,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -52,8 +53,6 @@ class BlogPost(Base):
 
 
 # Many-to-many with the existing Tag model.
-from sqlalchemy import Table
-
 blog_post_tag_association = Table(
     "blog_post_tag_association",
     Base.metadata,

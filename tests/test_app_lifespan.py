@@ -21,6 +21,12 @@ def _rows(*rows):
         def all(self):
             return list(rows)
 
+        def scalar_one(self):
+            return rows[0] if rows else 0
+
+        def first(self):
+            return rows[0] if rows else None
+
     return _Result()
 
 
@@ -87,8 +93,9 @@ async def test_lifespan_initialises_the_database(startup_calls):
     # The search index is per-process state, so it is rebuilt from the stored
     # chunks on every start.
     assert calls["rehydrate"] == 1
-    # Active tenants are enumerated so their default plans can be seeded.
-    assert session.executed == 1
+    # Active tenants are enumerated so their default plans can be seeded,
+    # and a second session enumerates tenants again for blog-post seeding.
+    assert session.executed >= 2
 
 
 async def test_lifespan_seeds_default_plans_per_active_tenant(monkeypatch, startup_calls):

@@ -62,8 +62,6 @@ async def create_dataset(
     db: AsyncSession = Depends(get_db),
 ):
     """Create evaluation dataset"""
-    from backend.app.services.evaluation import evaluation_engine
-    
     dataset = EvaluationDataset(
         tenant_id=user.tenant_id,
         kb_id=kb_id,

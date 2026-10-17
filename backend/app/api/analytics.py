@@ -1,15 +1,21 @@
 """Website analytics API endpoints."""
 import logging
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
-from uuid import UUID, uuid4
+from datetime import timedelta
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.dependencies import get_optional_user, require_admin, require_platform_user
-from backend.app.models.analytics import AnalyticsEvent, PageView, Subscriber, SubscriberStatus, UsageEvent, Visitor
+from backend.app.dependencies import get_optional_user
+from backend.app.models.analytics import (
+    AnalyticsEvent,
+    PageView,
+    Subscriber,
+    SubscriberStatus,
+    UsageEvent,
+    Visitor,
+)
 from backend.app.models.user import User
 from backend.app.schemas import (
     AnalyticsEventCreate,
@@ -358,6 +364,3 @@ async def get_subscriber_stats(db: AsyncSession = Depends(get_db)):
         unsubscribed=unsubscribed.scalar() or 0,
         bounced=bounced.scalar() or 0,
     )
-
-
-from uuid import uuid4

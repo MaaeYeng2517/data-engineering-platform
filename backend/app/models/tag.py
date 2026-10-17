@@ -1,6 +1,6 @@
 """Tag model for categorizing knowledge bases, documents, and data sources."""
 import uuid
-from sqlalchemy import Column, DateTime, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, String, Table, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -29,8 +29,6 @@ class Tag(Base):
 
 
 # Association tables for many-to-many relationships
-from sqlalchemy import Table, ForeignKey
-
 tag_kb_association = Table(
     "tag_kb_association",
     Base.metadata,

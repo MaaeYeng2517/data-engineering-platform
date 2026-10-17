@@ -10,7 +10,7 @@ BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_URL)
 RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", REDIS_URL)
 
 try:
-    from celery import Celery, CeleryTask
+    from celery import Celery
     from celery.schedules import crontab
 
     celery_app = Celery("dataair", broker=BROKER_URL, backend=RESULT_BACKEND)

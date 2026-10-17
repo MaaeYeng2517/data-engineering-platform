@@ -204,8 +204,8 @@ async def submit_approval(
 ):
     """Submit document for approval"""
     from backend.app.services.governance import governance
-    
-    approval = governance.approval.submit_for_approval(
+
+    governance.approval.submit_for_approval(
         kb_id, document_id, creator_id, reviewers
     )
     

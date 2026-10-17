@@ -15,6 +15,6 @@ _backend = types.ModuleType("backend")
 _backend.__path__ = [_deploy_root]
 sys.modules["backend"] = _backend
 
-from backend.main import app, lifespan  # noqa: E402
+from backend.main import app  # noqa: E402
 
 __all__ = ["app"]
