@@ -162,3 +162,42 @@ sequenceDiagram
 6. **Chat**: Public SSE streaming with provider chain fallback; emits structured frames (meta/delta/done/error).
 7. **Analytics/Blog**: Public endpoints track visitors/events/subscribers; blog serves published posts.
 8. **Pipelines**: Airflow orchestrates MinIO ingestion → dbt transforms → GE validates → OM syncs catalog/lineage; all pipeline data lands in Postgres and is exposed via API/dashboard.
+
+## Workflow Architecture (Component Workflow)
+
+```mermaid
+flowchart TB
+    subgraph "Data Ingestion Workflow"
+        W1[Source Files/Uploads] --> W2[Text Extraction & Cleaning]
+        W2 --> W3[Char-level Chunking 800/100]
+        W3 --> W4[Store in PostgreSQL]
+        W4 --> W5[Enqueue to Celery/Inline Index]
+        W5 --> W6[Token Chunking 300/50]
+        W6 --> W7[Embedding Generation]
+        W7 --> W8[Populate Hybrid Index]
+    end
+    
+    subgraph "Retrieval Workflow"
+        R1[User Query] --> R2[Hybrid Search - Vector+Keyword]
+        R2 --> R3[Merge 0.6V + 0.4K]
+        R3 --> R4[Reranker - Overlap/Pos/Len]
+        R4 --> R5[Context Builder - Dedupe/Compress/Budget]
+        R5 --> R6[Numbered Passages + Instructions]
+    end
+    
+    subgraph "Generation Workflow"
+        R6 --> G1[LLM Gateway - Provider Chain]
+        G1 -->|Success| G2[Stream/Return Answer + Citations]
+        G1 -->|All Fail| G3[Extractive Fallback]
+        G3 --> G2
+    end
+    
+    subgraph "Pipeline Workflow (Airflow)"
+        P1[MinIO Landing] -->|*/30 min| P2[dbt Build - Staging/Marts]
+        P2 -->|02:00| P3[Great Expectations QA]
+        P3 -->|03:30| P4[OpenMetadata Catalog Sync]
+        P4 -->|04:00| P5[Audit & Lineage Updated]
+    end
+    
+    W8 --> R2
+```
