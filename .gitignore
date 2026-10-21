@@ -42,3 +42,13 @@ test-doc.txt
 .vercel
 *.bak
 *.tmp
+
+# Unfinished card-purchase prototype (kept locally, not part of the platform)
+frontend/app/api/checkout/
+frontend/app/api/register/
+frontend/app/card/
+frontend/app/orders/
+frontend/app/payment/
+frontend/components/buy-button.tsx
+frontend/data/cards.json
+frontend/lib/stripe.ts

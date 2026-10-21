@@ -10,6 +10,7 @@ const navLinks = [
   { title: 'Articles', href: '/#articles' },
   { title: 'Categories', href: '/#categories' },
   { title: 'Tech Stack', href: '/#tech-stack' },
+  { title: 'Pricing', href: '/subscribe' },
   { title: 'Documents', href: '/documents' },
   { title: 'AI Agent Chat', href: '/chat' },
 ]

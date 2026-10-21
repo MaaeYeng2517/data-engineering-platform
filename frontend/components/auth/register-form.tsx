@@ -20,6 +20,13 @@ export function RegisterForm() {
   const { register } = useAuth()
   const router = useRouter()
 
+  function safeNextPath(): string {
+    const next = new URLSearchParams(window.location.search).get('next')
+    // Only same-origin paths, so `?next=` cannot become an open redirect.
+    if (!next || !next.startsWith('/') || next.startsWith('//')) return '/dashboard'
+    return next
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
@@ -30,7 +37,7 @@ export function RegisterForm() {
         ...(fullName.trim() ? { full_name: fullName.trim() } : {}),
       })
       toast.success('Workspace created — welcome to DataAir')
-      router.push('/dashboard')
+      router.push(safeNextPath())
       router.refresh()
     } catch (error) {
       toast.error(extractErrorDetail(error))
