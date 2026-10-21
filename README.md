@@ -319,3 +319,91 @@ flowchart LR
 | API ↔ LLM Providers | Request/Response (stream) | HTTP | Chat/RAG generation |
 | Airflow ↔ MinIO/DB/OM/GE/dbt | Orchestrated | Various | ETL, QA, catalog, transforms |
 | All → Prometheus/Grafana | Metrics | HTTP scrape | Observability |
+
+## 22. Payment-Gated Signup (Subscribe Before Use)
+
+A paid plan does not create an account. The workspace is opened only after the
+payment is confirmed, so nobody can use the platform on a plan they have not
+paid for.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as Visitor
+    participant FE as /subscribe
+    participant BE as POST /billing/subscribe
+    participant DB as PostgreSQL
+    participant ST as Stripe
+    participant WH as /billing/webhook
+    participant SS as /subscribe/success
+
+    U->>FE: Pick a plan, enter email + password
+    FE->>BE: POST /billing/subscribe {email, password, plan_code}
+    BE->>DB: INSERT pending_registrations (status=pending)
+    alt Free plan (price_cents = 0)
+        BE->>DB: CREATE tenant + user + plan + subscription
+        BE-->>FE: status=activated + access_token
+        FE->>U: Redirect to /dashboard
+    else Paid plan
+        BE->>ST: checkout.Session.create (mode=subscription)
+        ST-->>BE: session_id + checkout_url
+        BE->>DB: status=checkout_created
+        BE-->>FE: checkout_url
+        FE->>U: Redirect to Stripe Checkout
+        U->>ST: Pay
+        ST->>WH: checkout.session.completed
+        WH->>DB: CREATE tenant + user + plan + subscription
+        WH->>DB: status=completed
+        U->>SS: Return with ?session_id=…
+        SS->>BE: GET /billing/subscribe/status (poll every 2s)
+        BE->>ST: checkout.Session.retrieve (fallback if webhook is late)
+        BE-->>SS: activated=true
+        SS->>U: "เข้าสู่ workspace"
+    end
+```
+
+### The rules it enforces
+
+- **No account before payment.** A paid signup writes only a
+  `pending_registrations` row. The user, tenant and subscription appear when
+  Stripe confirms the payment.
+- **The free plan skips the wait.** It activates in the same request and
+  returns the session cookies, so there is no dead time for free users.
+- **The webhook is the primary path; the status poll is the fallback.** A
+  delayed or missed webhook still unblocks the user, because the poll asks
+  Stripe directly.
+- **Delivery is idempotent.** Stripe can deliver the same webhook twice. The
+  second delivery finds the account already there and closes the
+  registration instead of creating a second user.
+- **The password is stored hashed on the pending row,** so the browser never
+  has to resend it after the payment.
+
+### Endpoints
+
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `GET /api/v1/billing/public-plans` | public | Plan catalogue for the pricing page |
+| `POST /api/v1/billing/subscribe` | public | Start a signup; returns a checkout URL or activates a free plan |
+| `GET /api/v1/billing/subscribe/status` | public | Poll until the paid signup is activated |
+| `POST /api/v1/billing/checkout` | user | Checkout for an already-registered user upgrading |
+| `POST /api/v1/billing/portal` | user | Stripe customer portal |
+| `POST /api/v1/billing/webhook` | Stripe signature | Stripe events, including the activation |
+
+### Where the code lives
+
+| Piece | Location |
+|---|---|
+| `PendingRegistration` model | `backend/app/models/billing.py` |
+| Account activation (tenant + user + plan + subscription) | `backend/app/services/onboarding.py` |
+| Subscribe, status and webhook handling | `backend/app/api/billing.py` |
+| Schemas | `backend/app/schemas/__init__.py` (`SubscribeRequest`, `SubscribeResponse`, `SubscribeStatusResponse`, `PublicPlanResponse`) |
+| Pricing page | `frontend/app/subscribe/page.tsx` |
+| Payment status page | `frontend/app/subscribe/success/page.tsx` |
+| API client | `frontend/lib/api/billing.ts` |
+
+### Configuration
+
+`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_SUCCESS_URL` and
+`STRIPE_CANCEL_URL` drive the flow. `SAAS_PLANS` overrides the plan
+catalogue, and every paid plan needs a `stripe_price_id` — the production
+config check refuses to start without one.

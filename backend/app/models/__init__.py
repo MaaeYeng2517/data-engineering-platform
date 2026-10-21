@@ -1,6 +1,12 @@
 """SQLAlchemy models for the platform."""
 from backend.app.models.api_key import ApiKey, ApiKeyScope, ApiUsageLog
-from backend.app.models.billing import MembershipPlan, Subscription, SubscriptionStatus
+from backend.app.models.billing import (
+    MembershipPlan,
+    PendingRegistration,
+    RegistrationStatus,
+    Subscription,
+    SubscriptionStatus,
+)
 from backend.app.models.blog_post import BlogPost, STATUS_DRAFT, STATUS_PUBLISHED, STATUS_ARCHIVED
 from backend.app.models.analytics import (
     AnalyticsEvent,
@@ -59,6 +65,8 @@ __all__ = [
     "KnowledgeBase",
     "MembershipPlan",
     "MetadataSchema",
+    "PendingRegistration",
+    "RegistrationStatus",
     "Profile",
     "ProfileConfigItem",
     "ProfileEnvironment",

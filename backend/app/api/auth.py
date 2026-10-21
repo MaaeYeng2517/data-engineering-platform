@@ -1,6 +1,4 @@
 """Authentication API endpoints."""
-import re
-import uuid
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,9 +6,7 @@ from sqlalchemy.orm import selectinload
 
 from backend.app.utils.time import utcnow
 from backend.app.dependencies import get_current_user, sync_admin_role
-from backend.app.models.billing import MembershipPlan, Subscription, SubscriptionStatus
-from backend.app.models.tenant import Tenant
-from backend.app.models.user import User, UserRole
+from backend.app.models.user import User
 from backend.app.schemas import TokenResponse, UserCreate, UserLogin, UserResponse, UserUpdate
 from backend.app.security import (
     CSRF_COOKIE_NAME,
@@ -20,45 +16,14 @@ from backend.app.security import (
     create_csrf_token,
     create_refresh_token,
     decode_token,
-    hash_password,
     set_auth_cookies,
     verify_csrf_token,
     verify_password,
 )
-from backend.config import ADMIN_EMAILS, COOKIE_SAMESITE, COOKIE_SECURE
+from backend.config import COOKIE_SAMESITE, COOKIE_SECURE
 from backend.database import get_db
 
 router = APIRouter()
-
-
-def _slugify(value: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
-    return slug or "member"
-
-
-async def _unique_tenant_for_email(db: AsyncSession, email: str) -> Tenant:
-    local_part = email.split("@", 1)[0]
-    base_slug = _slugify(local_part)
-    for attempt in range(100):
-        slug = base_slug if attempt == 0 else f"{base_slug}-{uuid.uuid4().hex[:8]}"
-        result = await db.execute(select(Tenant.id).where(Tenant.slug == slug))
-        if result.scalar_one_or_none() is None:
-            tenant = Tenant(
-                name=f"{local_part}'s workspace",
-                slug=slug,
-                description="Workspace created during membership registration",
-                is_active=True,
-            )
-            db.add(tenant)
-            await db.flush()
-            return tenant
-    raise HTTPException(status_code=503, detail="Unable to create workspace")
-
-
-async def _seed_plans(db: AsyncSession, tenant: Tenant) -> None:
-    from backend.app.api.billing import seed_default_plans
-
-    await seed_default_plans(db, tenant.id)
 
 
 def _token_pair(user: User) -> tuple[str, str, str]:
@@ -77,46 +42,22 @@ async def register(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
+    from backend.app.services.onboarding import activate_account
+
     email = user_data.email.strip().lower()
     existing = await db.execute(select(User.id).where(User.email == email))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Email already registered")
 
-    tenant = await _unique_tenant_for_email(db, email)
-    role = UserRole.ADMIN if email in ADMIN_EMAILS else UserRole.MEMBER
-    user = User(
-        tenant_id=tenant.id,
+    activated = await activate_account(
+        db,
         email=email,
-        hashed_password=hash_password(user_data.password),
-        full_name=user_data.full_name.strip() if user_data.full_name else None,
-        is_active=True,
-        is_superuser=role == UserRole.ADMIN,
-        role=role,
+        password=user_data.password,
+        full_name=user_data.full_name,
+        plan_code="free",
+        data={"source": "registration"},
     )
-    db.add(user)
-    await db.flush()
-    await _seed_plans(db, tenant)
-
-    free_plan = await db.execute(
-        select(MembershipPlan).where(
-            MembershipPlan.tenant_id == tenant.id,
-            MembershipPlan.code == "free",
-        )
-    )
-    plan = free_plan.scalar_one_or_none()
-    if not plan:
-        raise HTTPException(status_code=500, detail="Free membership plan is unavailable")
-    db.add(
-        Subscription(
-            tenant_id=tenant.id,
-            user_id=user.id,
-            plan_id=plan.id,
-            status=SubscriptionStatus.ACTIVE,
-            data={"source": "registration"},
-        )
-    )
-    await db.commit()
-    await db.refresh(user)
+    user = activated.user
 
     access_token, refresh_token, csrf_token = _token_pair(user)
     set_auth_cookies(response, access_token, refresh_token, csrf_token)

@@ -1,7 +1,7 @@
-"""Billing models: membership plans and tenant subscriptions."""
+"""Billing models: membership plans, tenant subscriptions and pending registrations."""
 import enum
 import uuid
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -70,3 +70,47 @@ class Subscription(Base):
     tenant = relationship("Tenant", back_populates="subscriptions")
     user = relationship("User", back_populates="subscriptions")
     plan = relationship("MembershipPlan", back_populates="subscriptions")
+
+
+class RegistrationStatus(str, enum.Enum):
+    """Lifecycle of a registration that is waiting on payment."""
+
+    PENDING = "pending"
+    CHECKOUT_CREATED = "checkout_created"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+
+class PendingRegistration(Base):
+    """A signup that is not activated until its payment settles.
+
+    The row holds everything needed to finish the account after Stripe
+    confirms the payment, so the browser never has to resend the password.
+    """
+
+    __tablename__ = "pending_registrations"
+
+    id = Column(UUID, primary_key=True, default=uuid.uuid4)
+    email = Column(String(320), nullable=False, unique=True)
+    password_hash = Column(String(255), nullable=False)
+    full_name = Column(String(255))
+    plan_code = Column(String(50), nullable=False)
+    status = Column(String(30), default=RegistrationStatus.PENDING.value, nullable=False)
+    stripe_checkout_session_id = Column(String(255), unique=True)
+    stripe_customer_id = Column(String(255))
+    stripe_subscription_id = Column(String(255), unique=True)
+    amount_cents = Column(Integer, default=0, nullable=False)
+    currency = Column(String(3), default="thb", nullable=False)
+    created_user_id = Column(UUID, ForeignKey("users.id"))
+    failure_reason = Column(Text)
+    data = Column("metadata", JSON, default=dict, nullable=False)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+    completed_at = Column(DateTime)
+
+    created_user = relationship("User")
+
+    __table_args__ = (
+        UniqueConstraint("email", name="uq_pending_registrations_email"),
+    )

@@ -185,6 +185,57 @@ class EntitlementResponse(BaseModel):
     current_period_end: Optional[datetime] = None
 
 
+class PublicPlanResponse(BaseModel):
+    """A plan as shown on the pricing page, before an account exists."""
+
+    code: str
+    name: str
+    description: Optional[str] = None
+    price_cents: int = 0
+    currency: str = "thb"
+    interval: str = "month"
+    api_calls_per_month: int = 0
+    features: List[str] = Field(default_factory=list)
+    requires_payment: bool = False
+
+
+class SubscribeRequest(BaseModel):
+    """A signup that is only activated once the payment settles."""
+
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=8, max_length=128)
+    full_name: Optional[str] = Field(None, max_length=255)
+    plan_code: str = Field("free", max_length=50)
+    success_url: Optional[str] = None
+    cancel_url: Optional[str] = None
+
+
+class SubscribeResponse(BaseModel):
+    """Where the browser should go next, and what happened already."""
+
+    status: str
+    message: Optional[str] = None
+    checkout_url: Optional[str] = None
+    session_id: Optional[str] = None
+    plan_code: Optional[str] = None
+    amount_cents: int = 0
+    currency: str = "thb"
+    # Set when the account was activated straight away (free plan).
+    access_token: Optional[str] = None
+    user: Optional[UserResponse] = None
+    csrf_token: Optional[str] = None
+
+
+class SubscribeStatusResponse(BaseModel):
+    """Polled by the success page until the account exists."""
+
+    status: str
+    activated: bool = False
+    plan_code: Optional[str] = None
+    email: Optional[str] = None
+    message: Optional[str] = None
+
+
 class ApiKeyCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     scopes: List[ApiKeyScope] = Field(default_factory=lambda: [ApiKeyScope.READ])

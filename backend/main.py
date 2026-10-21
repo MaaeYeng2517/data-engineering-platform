@@ -163,6 +163,9 @@ async def csrf_middleware(request: Request, call_next):
         "/api/v1/auth/csrf-token",
         "/api/v1/auth/verify-csrf",
         "/api/v1/billing/webhook",
+        # A paid signup is a public entry point like /auth/register: the
+        # visitor has no session yet, so there is no CSRF token to present.
+        "/api/v1/billing/subscribe",
         "/api/v1/contact",
         # Chat is a stateless, rate-limited public endpoint with no cookie-driven
         # side effects, so it is reachable before a CSRF token exists.
