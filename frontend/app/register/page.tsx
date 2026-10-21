@@ -1,39 +1,30 @@
-import type { Metadata } from 'next'
-import Link from 'next/link'
-import { Database } from 'lucide-react'
-
-import { RegisterForm } from '@/components/auth/register-form'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-
-export const metadata: Metadata = {
-  title: 'Create account | DataAir',
-  description: 'Create your DataAir workspace and start building.',
-}
+"use client";
+import { useState } from "react";
+import { signIn } from "next-auth/react";
 
 export default function RegisterPage() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    await fetch("/api/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password, name }) });
+    await signIn("credentials", { email, password, callbackUrl: "/payment" });
+  }
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background to-muted p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Database className="h-6 w-6" />
-          </div>
-          <CardTitle className="text-2xl">สร้างบัญชีฟรี</CardTitle>
-          <CardDescription>เริ่มต้นด้วยแผนฟรี ไม่ต้องใช้บัตรเครดิต</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <RegisterForm />
-          <div className="mt-4 rounded-lg border bg-muted/40 p-3 text-center text-sm">
-            <span className="text-muted-foreground">ต้องการแผนแบบเสียเงิน?</span>{' '}
-            <Link
-              href="/subscribe"
-              className="font-medium text-foreground underline underline-offset-4"
-            >
-              เลือกแผนและชำระเงิน
-            </Link>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  )
+    <main className="min-h-screen flex items-center justify-center">
+      <form onSubmit={submit} className="border p-6 rounded space-y-3 w-80">
+        <h1 className="text-xl font-bold">Register</h1>
+        <input value={name} onChange={(e) => setName(e.target.value)} className="w-full border p-2 rounded" placeholder="Name" />
+        <input value={email} onChange={(e) => setEmail(e.target.value)} className="w-full border p-2 rounded" placeholder="Email" />
+        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border p-2 rounded" placeholder="Password" />
+        <button className="w-full bg-black text-white py-2 rounded">Sign up</button>
+            <div className="flex flex-col gap-2 mt-2">
+        <button type="button" onClick={() => (window as any).location="/api/auth/signin/google"} className="border p-2 rounded">Continue with Google</button>
+        <button type="button" onClick={() => (window as any).location="/api/auth/signin/apple"} className="border p-2 rounded">Continue with Apple</button>
+        <button type="button" onClick={() => (window as any).location="/api/auth/signin/facebook"} className="border p-2 rounded">Continue with Facebook</button>
+      </div>
+    </form>
+    </main>
+  );
 }

@@ -1,9 +1,11 @@
 """Billing API: membership plans, subscriptions, Stripe checkout and paid signup."""
 import logging
+import uuid
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -122,15 +124,55 @@ async def _pending_by_session(
     return result.scalar_one_or_none()
 
 
+def _configured_plan(code: str) -> dict | None:
+    """The authoritative plan definition from the environment."""
+    from backend.config import MEMBERSHIP_PLANS
+
+    for plan in MEMBERSHIP_PLANS:
+        if str(plan.get("code")) == code:
+            return plan
+    return None
+
+
 async def _plan_by_code(db: AsyncSession, code: str) -> MembershipPlan | None:
-    """Find a plan in any tenant — used before the tenant exists."""
+    """Find a plan in any tenant — used before the tenant exists.
+
+    Every tenant holds its own copy of the catalogue, and a copy created before
+    a price change keeps the old price. The configured catalogue is therefore
+    authoritative for the amount and the Stripe price. A transient object is
+    returned so the stored row is never mutated as a side effect of a lookup.
+    """
     result = await db.execute(
         select(MembershipPlan)
         .where(MembershipPlan.code == code, MembershipPlan.is_active.is_(True))
         .order_by(MembershipPlan.sort_order)
         .limit(1)
     )
-    return result.scalar_one_or_none()
+    stored = result.scalar_one_or_none()
+
+    config = _configured_plan(code)
+    if config is None:
+        return stored
+
+    stored_price_id = stored.stripe_price_id if stored is not None else None
+    return MembershipPlan(
+        id=stored.id if stored is not None else uuid.uuid4(),
+        tenant_id=stored.tenant_id if stored is not None else uuid.uuid4(),
+        code=code,
+        name=str(config.get("name", code)),
+        description=config.get("description"),
+        price_cents=int(
+            config["price_cents"] if "price_cents" in config
+            else (stored.price_cents if stored is not None else 0)
+        ),
+        currency=str(config.get("currency", "thb")),
+        interval=str(config.get("interval", "month")),
+        api_calls_per_month=int(config.get("api_calls_per_month", 0)),
+        stripe_price_id=config.get("stripe_price_id") or stored_price_id,
+        features=list(config.get("features", [])),
+        is_active=bool(config.get("is_active", True)),
+        sort_order=int(config.get("sort_order", 0)),
+    )
 
 
 async def _activate_pending(
@@ -288,7 +330,16 @@ async def subscribe(
     )
     pending.status = RegistrationStatus.CHECKOUT_CREATED.value
     pending.stripe_checkout_session_id = session.id
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # A checkout session id is unique, and so is the email. A collision
+        # means the same signup was submitted twice concurrently.
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A checkout is already in progress for this email",
+        ) from None
 
     logger.info(
         "Created checkout session %s for %s on plan %s (%s)",
@@ -392,27 +443,54 @@ async def public_plans(db: AsyncSession = Depends(get_db)):
     """
     from backend.config import MEMBERSHIP_PLANS
 
+    # Every tenant holds its own copy of the catalogue, so the same code
+    # appears once per tenant and a copy made before a price change keeps the
+    # old price. The configured catalogue is authoritative.
     result = await db.execute(
         select(MembershipPlan)
         .where(MembershipPlan.is_active.is_(True))
         .order_by(MembershipPlan.sort_order)
     )
-    plans = result.scalars().all()
+    unique: dict[str, MembershipPlan] = {}
+    for plan in result.scalars().all():
+        unique.setdefault(plan.code, plan)
 
-    if plans:
-        return [
-            PublicPlanResponse(
-                code=plan.code,
-                name=plan.name,
-                description=plan.description,
-                price_cents=plan.price_cents,
-                currency=plan.currency,
-                interval=plan.interval,
-                api_calls_per_month=plan.api_calls_per_month,
-                features=list(plan.features or []),
-                requires_payment=plan.price_cents > 0,
+    def _to_public(code: str, fallback: MembershipPlan | None) -> PublicPlanResponse:
+        config = _configured_plan(code)
+        if config is None:
+            if fallback is None:
+                raise HTTPException(status_code=404, detail=f"Plan '{code}' not found")
+            return PublicPlanResponse(
+                code=fallback.code,
+                name=fallback.name,
+                description=fallback.description,
+                price_cents=fallback.price_cents,
+                currency=fallback.currency,
+                interval=fallback.interval,
+                api_calls_per_month=fallback.api_calls_per_month,
+                features=list(fallback.features or []),
+                requires_payment=fallback.price_cents > 0,
             )
-            for plan in plans
+        price_cents = int(
+            config["price_cents"] if "price_cents" in config
+            else (fallback.price_cents if fallback is not None else 0)
+        )
+        return PublicPlanResponse(
+            code=code,
+            name=str(config.get("name", code)),
+            description=config.get("description"),
+            price_cents=price_cents,
+            currency=str(config.get("currency", "thb")),
+            interval=str(config.get("interval", "month")),
+            api_calls_per_month=int(config.get("api_calls_per_month", 0)),
+            features=list(config.get("features", [])),
+            requires_payment=price_cents > 0,
+        )
+
+    if unique:
+        return [
+            _to_public(code, plan)
+            for code, plan in sorted(unique.items(), key=lambda item: item[1].sort_order)
         ]
 
     # No tenant has been created yet — fall back to the configured catalogue.

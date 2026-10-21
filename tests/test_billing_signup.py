@@ -195,6 +195,79 @@ async def test_paid_plan_carries_a_stripe_price(session):
     assert plan.stripe_price_id == "price_pro"
 
 
+async def test_the_configured_catalogue_wins_over_a_stale_stored_copy(session, monkeypatch):
+    """A plan row written before a price change must not quote the old price."""
+    tenant = Tenant(id=uuid.uuid4(), name="Stale", slug="stale", is_active=True)
+    session.add(tenant)
+    session.add(
+        MembershipPlan(
+            tenant_id=tenant.id,
+            code="pro",
+            name="Pro",
+            price_cents=100,
+            stripe_price_id="price_old",
+            features=[],
+        )
+    )
+    await session.commit()
+
+    monkeypatch.setattr(
+        billing_api,
+        "_configured_plan",
+        lambda code: {
+            "code": "pro",
+            "name": "Pro",
+            "price_cents": 29000,
+            "currency": "thb",
+            "stripe_price_id": "price_new",
+            "features": [],
+        }
+        if code == "pro"
+        else None,
+    )
+
+    plan = await billing_api._plan_by_code(session, "pro")
+    assert plan is not None
+    assert plan.price_cents == 29000
+    assert plan.stripe_price_id == "price_new"
+
+
+async def test_the_stored_price_survives_when_the_config_sets_none(session, monkeypatch):
+    """An empty configuration must not wipe a price that was set earlier."""
+    tenant = Tenant(id=uuid.uuid4(), name="Kept", slug="kept", is_active=True)
+    session.add(tenant)
+    session.add(
+        MembershipPlan(
+            tenant_id=tenant.id,
+            code="pro",
+            name="Pro",
+            price_cents=29000,
+            stripe_price_id="price_kept",
+            features=[],
+        )
+    )
+    await session.commit()
+
+    monkeypatch.setattr(
+        billing_api,
+        "_configured_plan",
+        lambda code: {
+            "code": "pro",
+            "name": "Pro",
+            "price_cents": 29000,
+            "currency": "thb",
+            "stripe_price_id": "",
+            "features": [],
+        }
+        if code == "pro"
+        else None,
+    )
+
+    plan = await billing_api._plan_by_code(session, "pro")
+    assert plan is not None
+    assert plan.stripe_price_id == "price_kept"
+
+
 async def test_pending_lookup_helpers_find_the_row(session):
     pending = PendingRegistration(
         id=uuid.uuid4(),

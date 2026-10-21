@@ -1,0 +1,6 @@
+[
+  {"id":"1","name":"Charizard Holo","description":"Base Set 1st Edition","price":129900,"rarity":"Rare Holo","category":"Pokemon","stock":5,"imageUrl":null,"active":true},
+  {"id":"2","name":"Blue-Eyes White Dragon","description":"LOB 1st Edition","price":89900,"rarity":"Ultra Rare","category":"Yu-Gi-Oh","stock":3,"imageUrl":null,"active":true},
+  {"id":"3","name":"Black Lotus","description":"Alpha","price":999900,"rarity":"Rare","category":"Magic","stock":1,"imageUrl":null,"active":true},
+  {"id":"4","name":"Pikachu Illustrator","description":"Promo","price":500000,"rarity":"Promo","category":"Pokemon","stock":2,"imageUrl":null,"active":true}
+]

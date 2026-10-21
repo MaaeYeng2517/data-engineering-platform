@@ -1,39 +1,18 @@
-import type { Metadata } from 'next'
-import Link from 'next/link'
-import { LoginForm } from '@/components/auth/login-form'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-
-export const metadata: Metadata = {
-  title: 'Login | DataAir',
-  description: 'Sign in to your DataAir account',
-}
+"use client";
+import { signIn } from "next-auth/react";
+import { useState } from "react";
 
 export default function LoginPage() {
+  const [email, setEmail] = useState("demo@cardvault.io");
+  const [password, setPassword] = useState("password123");
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <span className="text-2xl font-bold">D</span>
-          </div>
-          <CardTitle className="text-2xl">Welcome back to DataAir</CardTitle>
-          <CardDescription>
-            Sign in to your account to continue
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <LoginForm />
-          <p className="mt-6 text-center text-sm text-muted-foreground">
-            Don&apos;t have an account?{' '}
-            <Link
-              href="/register"
-              className="font-medium text-foreground underline underline-offset-4"
-            >
-              Create one free
-            </Link>
-          </p>
-        </CardContent>
-      </Card>
-    </div>
-  )
+    <main className="min-h-screen flex items-center justify-center">
+      <form onSubmit={(e) => { e.preventDefault(); signIn("credentials", { email, password, callbackUrl: "/card" }); }} className="border p-6 rounded space-y-3 w-80">
+        <h1 className="text-xl font-bold">Login</h1>
+        <input value={email} onChange={(e) => setEmail(e.target.value)} className="w-full border p-2 rounded" placeholder="Email" />
+        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border p-2 rounded" placeholder="Password" />
+        <button className="w-full bg-black text-white py-2 rounded">Sign in</button>
+      </form>
+    </main>
+  );
 }
