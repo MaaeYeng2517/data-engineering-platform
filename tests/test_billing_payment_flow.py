@@ -9,6 +9,7 @@ import uuid
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from starlette.responses import Response as StarletteResponse
 
 from backend.app.api import billing as billing_api
 from backend.app.models.billing import (
@@ -21,7 +22,6 @@ from backend.app.models.billing import (
 from backend.app.models.tenant import Tenant
 from backend.app.models.user import User
 from backend.database import Base
-from starlette.responses import Response as StarletteResponse
 
 
 class _FakeCheckoutSession:
@@ -166,7 +166,7 @@ async def test_paid_signup_activates_once_stripe_confirms_the_payment(session, m
 
     # Stripe confirms the payment.
     stripe.paid = True
-    status = await billing_api.subscribe_status("cs_test_1", session)
+    status = await billing_api.subscribe_status(StarletteResponse(), "cs_test_1", session)
 
     assert status.activated is True
     assert status.status == "activated"

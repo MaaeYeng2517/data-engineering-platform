@@ -217,7 +217,7 @@ export function DashboardOverview() {
                 ))}
               </div>
             )}
-            {platform.data && (
+                {platform.data && (
               <p className="mt-3 text-xs text-muted-foreground">
                 {platform.data.summary.healthy} of {platform.data.summary.total} systems
                 reachable ·{' '}
@@ -243,6 +243,22 @@ export function DashboardOverview() {
                   </a>
                 ) : (
                   'Grafana'
+                )}
+                {' · '}
+                {links.data?.superset ? (
+                  <a href={links.data.superset} target="_blank" rel="noreferrer" className="underline">
+                    Superset
+                  </a>
+                ) : (
+                  'Superset'
+                )}
+                {' · '}
+                {links.data?.ranger ? (
+                  <a href={links.data.ranger} target="_blank" rel="noreferrer" className="underline">
+                    Ranger
+                  </a>
+                ) : (
+                  'Ranger'
                 )}
               </p>
             )}

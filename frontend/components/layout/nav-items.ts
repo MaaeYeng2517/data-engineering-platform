@@ -78,7 +78,8 @@ export const navGroups: NavGroup[] = [
   {
     label: 'Governance',
     items: [
-      { title: 'Governance', href: '/dashboard/governance', icon: ShieldCheck },
+      { title: 'Governance', href: '/dashboard/governance', icon: Shield },
+      { title: 'Visualization', href: '/dashboard/visualization', icon: BarChart3 },
       { title: 'Approval Queue', href: '/dashboard/approvals', icon: Bell },
       { title: 'Audit Log', href: '/dashboard/audit', icon: Shield },
     ],

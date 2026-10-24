@@ -185,7 +185,8 @@ async def _activate_pending(
     """Turn a paid registration into a real account. Idempotent.
 
     Returns True when the account exists afterwards. The password is already
-    hashed on the pending row, so it is restored rather than re-hashed.
+    hashed on the pending row, so it is restored as it is — hashing it a
+    second time would lock the user out of the account they just paid for.
     """
     if pending.status == RegistrationStatus.COMPLETED.value:
         return True
@@ -196,7 +197,7 @@ async def _activate_pending(
         activated = await activate_account(
             db,
             email=pending.email,
-            password=pending.password_hash,
+            password_hash=pending.password_hash,
             full_name=pending.full_name,
             plan_code=pending.plan_code,
             stripe_customer_id=stripe_customer_id or pending.stripe_customer_id,
@@ -359,8 +360,32 @@ async def subscribe(
     )
 
 
+async def _establish_session(
+    db: AsyncSession, pending: PendingRegistration, response: Response
+) -> bool:
+    """Give the browser a session for the account that was just activated.
+
+    The webhook cannot set cookies — it is a server-to-server call — so the
+    browser is logged in here, on the status poll the success page makes. That
+    is the moment the user is sent into their workspace, and it has to work
+    without asking for the password again.
+    """
+    if pending.created_user_id is None:
+        return False
+
+    result = await db.execute(select(User).where(User.id == pending.created_user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        return False
+
+    access_token, refresh_token, csrf_token = _token_pair(user)
+    set_auth_cookies(response, access_token, refresh_token, csrf_token)
+    return True
+
+
 @router.get("/subscribe/status", response_model=SubscribeStatusResponse)
 async def subscribe_status(
+    response: Response,
     session_id: str = Query(..., min_length=4, max_length=255),
     db: AsyncSession = Depends(get_db),
 ):
@@ -374,6 +399,7 @@ async def subscribe_status(
         raise HTTPException(status_code=404, detail="Checkout session not found")
 
     if pending.status == RegistrationStatus.COMPLETED.value:
+        await _establish_session(db, pending, response)
         return SubscribeStatusResponse(
             status="activated",
             activated=True,
@@ -406,6 +432,7 @@ async def subscribe_status(
                 stripe_customer_id=session.get("customer"),
                 stripe_subscription_id=session.get("subscription"),
             )
+            await _establish_session(db, pending, response)
             return SubscribeStatusResponse(
                 status="activated",
                 activated=True,

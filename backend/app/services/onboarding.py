@@ -87,7 +87,8 @@ async def activate_account(
     db: AsyncSession,
     *,
     email: str,
-    password: str,
+    password: Optional[str] = None,
+    password_hash: Optional[str] = None,
     full_name: Optional[str] = None,
     plan_code: str = "free",
     stripe_customer_id: Optional[str] = None,
@@ -98,9 +99,15 @@ async def activate_account(
 ) -> ActivatedAccount:
     """Create the tenant, the admin user, the plans and the subscription.
 
-    The password is hashed here; the caller may pass either a plaintext
-    password or an already-hashed one through `password`.
+    The password arrives either as plaintext (`password`) or already hashed
+    (`password_hash`). The two are never mixed: hashing an existing hash would
+    produce a password the user can never type. The paid signup stores the
+    hash on the pending row and passes it back here, so the browser never has
+    to resend the password after the payment.
     """
+    if password is None and password_hash is None:
+        raise ValueError("activate_account needs a password or a password_hash")
+
     email = email.strip().lower()
 
     existing = await db.execute(select(User.id).where(User.email == email))
@@ -113,7 +120,7 @@ async def activate_account(
     user = User(
         tenant_id=tenant.id,
         email=email,
-        hashed_password=hash_password(password),
+        hashed_password=password_hash or hash_password(password),
         full_name=full_name.strip() if full_name else None,
         is_active=True,
         is_superuser=role == UserRole.ADMIN,

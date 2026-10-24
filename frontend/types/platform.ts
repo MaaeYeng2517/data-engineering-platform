@@ -13,6 +13,8 @@ export interface PlatformLinks {
   openmetadata: string
   prometheus: string
   grafana: string
+  superset: string
+  ranger?: string
 }
 
 export interface SalesDay {

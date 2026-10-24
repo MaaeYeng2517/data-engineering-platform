@@ -59,6 +59,12 @@ PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://localhost:9090").rstrip("/"
 PROMETHEUS_PUBLIC_URL = os.getenv("PROMETHEUS_PUBLIC_URL", PROMETHEUS_URL).rstrip("/")
 GRAFANA_URL = os.getenv("GRAFANA_URL", "http://localhost:3001").rstrip("/")
 GRAFANA_PUBLIC_URL = os.getenv("GRAFANA_PUBLIC_URL", GRAFANA_URL).rstrip("/")
+SUPERSET_URL = os.getenv("SUPERSET_URL", "http://localhost:8088").rstrip("/")
+SUPERSET_PUBLIC_URL = os.getenv("SUPERSET_PUBLIC_URL", SUPERSET_URL).rstrip("/")
+SUPERSET_USERNAME = os.getenv("SUPERSET_ADMIN_USER") or os.getenv("SUPERSET_USERNAME") or "admin"
+SUPERSET_PASSWORD = os.getenv("SUPERSET_ADMIN_PASSWORD") or os.getenv("SUPERSET_PASSWORD") or "admin"
+RANGER_URL = os.getenv("RANGER_URL", "http://localhost:6080").rstrip("/")
+RANGER_PUBLIC_URL = os.getenv("RANGER_PUBLIC_URL", RANGER_URL).rstrip("/")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 ELASTICSEARCH_URL = os.getenv("ELASTICSEARCH_URL", "http://localhost:9200")
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
@@ -182,13 +188,17 @@ PROFILE_HEALTH_CHECK_MAX_TIMEOUT_SECONDS = float(
 
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+# Where Stripe sends the browser after a checkout. The default is the billing
+# page of the signed-in workspace, which is where an upgrade ends up — the
+# payment-gated signup passes its own URLs, because a signup has no session
+# yet and lands on /subscribe/success instead.
 STRIPE_SUCCESS_URL = os.getenv(
     "STRIPE_SUCCESS_URL",
-    f"{FRONTEND_URL}/billing?checkout=success",
+    f"{FRONTEND_URL}/dashboard/billing?checkout=success",
 )
 STRIPE_CANCEL_URL = os.getenv(
     "STRIPE_CANCEL_URL",
-    f"{FRONTEND_URL}/billing?checkout=cancelled",
+    f"{FRONTEND_URL}/dashboard/billing?checkout=cancelled",
 )
 STRIPE_FREE_PRICE_ID = os.getenv("STRIPE_FREE_PRICE_ID", "")
 STRIPE_PRO_PRICE_ID = os.getenv("STRIPE_PRO_PRICE_ID", "")

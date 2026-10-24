@@ -223,6 +223,81 @@ services:
       - dataair-network
     restart: unless-stopped
 
+  # Apache Superset - Data Visualization & BI
+  superset-init:
+    image: apache/superset:4.1.1
+    container_name: dataair-superset-init
+    command: ["/bin/bash", "/app/docker/superset-init.sh"]
+    environment:
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-change_me_superset_secret_key_min_32_chars}
+      SUPERSET_ADMIN_USER: ${SUPERSET_ADMIN_USER:-admin}
+      SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD:-admin}
+      SUPERSET_ADMIN_EMAIL: ${SUPERSET_ADMIN_EMAIL:-admin@dataair.local}
+      SUPERSET_ADMIN_FIRSTNAME: ${SUPERSET_ADMIN_FIRSTNAME:-DataAir}
+      SUPERSET_ADMIN_LASTNAME: ${SUPERSET_ADMIN_LASTNAME:-Admin}
+      SUPERSET_LOAD_EXAMPLES: ${SUPERSET_LOAD_EXAMPLES:-no}
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-dataair}:${POSTGRES_PASSWORD:-dataair}@postgres:5432/superset
+      REDIS_URL: redis://redis:6379/1
+    volumes:
+      - ./docker/superset-init.sh:/app/docker/superset-init.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - dataair-network
+    restart: "no"
+
+  # Apache Ranger - Data Security & Access Control
+  ranger-db-init:
+    image: postgres:16
+    container_name: dataair-ranger-db-init
+    command: >
+      sh -c "
+      export PGPASSWORD=$${POSTGRES_PASSWORD};
+      until pg_isready -h postgres -U $${POSTGRES_USER}; do sleep 2; done;
+      psql -h postgres -U $${POSTGRES_USER} -d postgres -tc \"SELECT 1 FROM pg_database WHERE datname = 'ranger'\" | grep -q 1 || psql -h postgres -U $${POSTGRES_USER} -d postgres -c 'CREATE DATABASE ranger;';
+      "
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dataair}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dataair}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - dataair-network
+    restart: "no"
+
+  ranger-admin:
+    image: apache/ranger:2.5.0
+    container_name: dataair-ranger
+    environment:
+      RANGER_ADMIN_PASSWORD: ${RANGER_ADMIN_PASSWORD:-rangeradmin}
+      RANGER_DB_HOST: postgres
+      RANGER_DB_NAME: ranger
+      RANGER_DB_USER: ${POSTGRES_USER:-dataair}
+      RANGER_DB_PASSWORD: ${POSTGRES_PASSWORD:-dataair}
+      JAVA_OPTS: -Xms512m -Xmx1024m
+    ports:
+      - "${RANGER_PORT:-6080}:6080"
+    depends_on:
+      ranger-db-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ranger_data:/opt/ranger/admin/ews/logs
+    networks:
+      - dataair-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6080/login.jsp"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
+
   # Qdrant Vector Database
   qdrant:
     image: qdrant/qdrant:latest
@@ -756,6 +831,8 @@ services:
       - frontend
       - airflow-webserver
       - openmetadata
+      - superset
+      - ranger-admin
     networks:
       - dataair-network
     restart: unless-stopped
@@ -772,6 +849,8 @@ volumes:
   grafana_data:
   openmetadata_data:
   airflow_logs:
+  superset_data:
+  ranger_data:
 
 networks:
   dataair-network:

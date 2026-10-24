@@ -12,7 +12,9 @@ import uuid
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from starlette.responses import Response as StarletteResponse
 
 from backend.app.api import billing as billing_api
 from backend.app.models.billing import (
@@ -25,6 +27,7 @@ from backend.app.models.billing import (
 from backend.app.models.tenant import Tenant
 from backend.app.models.user import User
 from backend.app.schemas import SubscribeRequest
+from backend.app.security import verify_password
 from backend.app.services import onboarding
 from backend.database import Base
 
@@ -294,3 +297,62 @@ async def test_subscription_is_created_on_the_chosen_plan(session):
     assert subscription is not None
     assert subscription.plan_id == activated.plan.id
     assert subscription.status == SubscriptionStatus.ACTIVE.value
+
+
+async def test_the_paid_signup_keeps_the_password_the_user_typed(session):
+    """The pending row already holds a hash — it must not be hashed again.
+
+    Hashing a hash produces a password nobody can type, so every paying
+    customer would be locked out of the workspace they just paid for.
+    """
+    pending = PendingRegistration(
+        id=uuid.uuid4(),
+        email="payer@example.com",
+        password_hash=onboarding.hash_password("correcthorse"),
+        plan_code="pro",
+        amount_cents=29000,
+    )
+    session.add(pending)
+    await session.commit()
+
+    assert await billing_api._activate_pending(session, pending) is True
+
+    user = (await session.execute(select(User).where(User.email == "payer@example.com"))).scalars().one()
+    assert verify_password("correcthorse", user.hashed_password)
+    assert user.hashed_password == pending.password_hash
+
+
+async def test_activation_accepts_a_pre_hashed_password(session):
+    """The onboarding service takes a hash as it is, and hashes a plaintext."""
+    activated = await onboarding.activate_account(
+        session, email="hashed@example.com", password_hash=onboarding.hash_password("longenough")
+    )
+    assert verify_password("longenough", activated.user.hashed_password)
+
+    other = await onboarding.activate_account(
+        session, email="plain@example.com", password="longenough"
+    )
+    assert verify_password("longenough", other.user.hashed_password)
+
+
+async def test_the_status_poll_logs_the_paid_buyer_in(session):
+    """After the payment the browser gets a session, so the workspace opens."""
+    pending = PendingRegistration(
+        id=uuid.uuid4(),
+        email="session@example.com",
+        password_hash=onboarding.hash_password("longenough"),
+        plan_code="pro",
+        stripe_checkout_session_id="cs_test_session",
+    )
+    session.add(pending)
+    await session.commit()
+
+    await billing_api._activate_pending(session, pending)
+
+    response = StarletteResponse()
+    logged_in = await billing_api._establish_session(session, pending, response)
+
+    assert logged_in is True
+    cookies = response.headers.getlist("set-cookie")
+    assert any("dataair_access_token=" in cookie for cookie in cookies)
+    assert any("dataair_csrf_token=" in cookie for cookie in cookies)

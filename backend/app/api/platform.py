@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from backend.app.services.platform import airflow, minio_storage, openmetadata, prometheus, warehouse
+from backend.app.services.platform import airflow, minio_storage, openmetadata, prometheus, superset, warehouse
 from backend.app.services.platform.status import get_system_status
 
 logger = logging.getLogger(__name__)
@@ -158,15 +158,60 @@ async def monitoring_summary():
     return await prometheus.get_platform_summary()
 
 
+# --- Superset visualization --------------------------------------------------
+
+@router.get("/visualization/health")
+async def superset_health():
+    return await superset.get_health()
+
+
+@router.get("/visualization/dashboards")
+async def superset_dashboards(limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
+    return await superset.list_dashboards(limit=limit, offset=offset)
+
+
+@router.get("/visualization/dashboards/{dashboard_id}")
+async def superset_dashboard(dashboard_id: int):
+    dashboard = await superset.get_dashboard(dashboard_id)
+    if not dashboard:
+        raise HTTPException(status_code=404, detail="Dashboard not found")
+    return dashboard
+
+
+@router.get("/visualization/dashboards/{dashboard_id}/embed")
+async def superset_dashboard_embed(dashboard_id: int):
+    embed = await superset.get_dashboard_embed(dashboard_id)
+    if not embed:
+        raise HTTPException(status_code=404, detail="Embed info not found")
+    return embed
+
+
+@router.post("/visualization/dashboards/{dashboard_id}/guest-token")
+async def superset_guest_token(dashboard_id: int, body: Optional[Dict[str, Any]] = None):
+    body = body or {}
+    token = await superset.create_guest_token(
+        dashboard_id,
+        user=body.get("user"),
+        resources=body.get("resources"),
+        rls=body.get("rls"),
+    )
+    if not token:
+        raise HTTPException(status_code=502, detail="Failed to create guest token")
+    return token
+
+
 # --- Links to external UIs -------------------------------------------------
 
 @router.get("/links")
 async def platform_links() -> Dict[str, Any]:
+    import os
     from backend.config import (
         AIRFLOW_PUBLIC_URL,
         GRAFANA_PUBLIC_URL,
         OPENMETADATA_PUBLIC_URL,
         PROMETHEUS_PUBLIC_URL,
+        SUPERSET_PUBLIC_URL,
+        RANGER_PUBLIC_URL,
     )
 
     return {
@@ -174,4 +219,6 @@ async def platform_links() -> Dict[str, Any]:
         "openmetadata": OPENMETADATA_PUBLIC_URL,
         "prometheus": PROMETHEUS_PUBLIC_URL,
         "grafana": GRAFANA_PUBLIC_URL,
+        "superset": SUPERSET_PUBLIC_URL,
+        "ranger": RANGER_PUBLIC_URL,
     }

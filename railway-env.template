@@ -118,8 +118,8 @@ ADMIN_EMAILS=your-admin@email.com
 # =============================================================================
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
-STRIPE_SUCCESS_URL=https://maaelab-data-air.vercel.app/billing?checkout=success
-STRIPE_CANCEL_URL=https://maaelab-data-air.vercel.app/billing?checkout=cancelled
+STRIPE_SUCCESS_URL=https://maaelab-data-air.vercel.app/dashboard/billing?checkout=success
+STRIPE_CANCEL_URL=https://maaelab-data-air.vercel.app/dashboard/billing?checkout=cancelled
 STRIPE_FREE_PRICE_ID=
 STRIPE_PRO_PRICE_ID=
 STRIPE_ENTERPRISE_PRICE_ID=

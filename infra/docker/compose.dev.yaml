@@ -1,0 +1,90 @@
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+    container_name: eda-api
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file:
+      - ../../.env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+    volumes:
+      - ../../app:/app/app:ro
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+    container_name: eda-worker
+    command: celery -A app.workers.celery_app worker -l info -Q ingestion,transform
+    env_file:
+      - ../../.env
+    depends_on:
+      - api
+      - redis
+      - db
+    volumes:
+      - ../../app:/app/app:ro
+
+  beat:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+    container_name: eda-beat
+    command: celery -A app.workers.celery_app beat -l info
+    env_file:
+      - ../../.env
+    depends_on:
+      - worker
+
+  db:
+    image: postgres:18
+    container_name: eda-db
+    environment:
+      POSTGRES_DB: enterprise_data
+      POSTGRES_USER: data_api
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change_me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U data_api -d enterprise_data"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    container_name: eda-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  minio:
+    image: minio/minio:latest
+    container_name: eda-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

@@ -1,0 +1,583 @@
+# API_SPECIFICATION.yaml
+
+openapi: 3.0.3
+info:
+  title: Enterprise Data Platform - Control API
+  description: |
+    Control Plane API สำหรับ Governance, Catalog, Pipeline, Approval, Audit, Evidence.
+    ออกแบบตามหลัก Security by Design, Least Privilege, Auditability.
+  version: 1.0.0
+  contact:
+    name: Platform Engineering
+    email: platform@enterprise.local
+
+servers:
+  - url: https://api.data-platform.local/api/v1
+    description: Production
+  - url: https://api-staging.data-platform.local/api/v1
+    description: Staging
+  - url: http://localhost:8000/api/v1
+    description: Development
+
+tags:
+  - name: Identity
+  - name: Users & Roles
+  - name: Domains
+  - name: Datasets
+  - name: Data Sources
+  - name: Pipelines
+  - name: Data Quality
+  - name: Lineage
+  - name: Approvals
+  - name: Governance
+  - name: Audit
+  - name: Evidence
+  - name: Operations
+
+security:
+  - bearerAuth: []
+  - csrfProtection: []
+
+paths:
+  /identity/me:
+    get:
+      tags: [Identity]
+      summary: Get current user context
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: User context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserContext'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /domains:
+    get:
+      tags: [Domains]
+      summary: List data domains
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Domain list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDomains'
+    post:
+      tags: [Domains]
+      summary: Create data domain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DomainCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Domain'
+
+  /datasets:
+    get:
+      tags: [Datasets]
+      summary: Search/list datasets
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - in: query
+          name: domain_id
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: classification
+          schema:
+            $ref: '#/components/schemas/Classification'
+        - in: query
+          name: q
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Dataset list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDatasets'
+    post:
+      tags: [Datasets]
+      summary: Register dataset
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatasetCreate'
+      responses:
+        '201':
+          description: Created (draft)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dataset'
+
+  /datasets/{id}:
+    get:
+      tags: [Datasets]
+      summary: Get dataset detail
+      parameters:
+        - $ref: '#/components/parameters/DatasetId'
+      responses:
+        '200':
+          description: Dataset detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetDetail'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /datasets/{id}/submit:
+    post:
+      tags: [Datasets]
+      summary: Submit dataset for approval
+      parameters:
+        - $ref: '#/components/parameters/DatasetId'
+      responses:
+        '200':
+          description: Submitted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalActionResponse'
+
+  /datasets/{id}/approve:
+    post:
+      tags: [Datasets]
+      summary: Approve dataset publication
+      parameters:
+        - $ref: '#/components/parameters/DatasetId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalDecision'
+      responses:
+        '200':
+          description: Approved/Published
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalActionResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /pipelines/{id}/runs:
+    post:
+      tags: [Pipelines]
+      summary: Trigger pipeline run
+      parameters:
+        - $ref: '#/components/parameters/PipelineId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: Run queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineRun'
+
+  /pipelines/{id}/runs/{run_id}:
+    get:
+      tags: [Pipelines]
+      summary: Get pipeline run status
+      parameters:
+        - $ref: '#/components/parameters/PipelineId'
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: Run status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineRunDetail'
+
+  /datasets/{id}/lineage:
+    get:
+      tags: [Lineage]
+      summary: Get dataset lineage
+      parameters:
+        - $ref: '#/components/parameters/DatasetId'
+      responses:
+        '200':
+          description: Lineage graph
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LineageGraph'
+
+  /datasets/{id}/quality-results:
+    get:
+      tags: [Data Quality]
+      summary: Get quality results
+      parameters:
+        - $ref: '#/components/parameters/DatasetId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Quality results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedQualityResults'
+
+  /audit-events:
+    get:
+      tags: [Audit]
+      summary: Query audit events (scoped)
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - in: query
+          name: from
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: to
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: actor_subject
+          schema:
+            type: string
+        - in: query
+          name: action
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Audit events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAuditEvents'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /evidence:
+    get:
+      tags: [Evidence]
+      summary: List evidence records
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Evidence list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedEvidence'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    csrfProtection:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    DatasetId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PipelineId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RunId:
+      name: run_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+
+  responses:
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Not Found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, correlation_id]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            correlation_id:
+              type: string
+              format: uuid
+            details:
+              type: array
+              items: {}
+
+    Classification:
+      type: string
+      enum: [public, internal, confidential, restricted]
+
+    DatasetStatus:
+      type: string
+      enum: [draft, pending_approval, published, deprecated, archived]
+
+    UserContext:
+      type: object
+      required: [user_id, organization_id, roles, permissions]
+      properties:
+        user_id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        roles: { type: array, items: { type: string } }
+        permissions: { type: array, items: { type: string } }
+        scopes: { type: array, items: { type: object } }
+
+    DomainCreate:
+      type: object
+      required: [name, owner_user_id]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        owner_user_id: { type: string, format: uuid }
+
+    Domain:
+      type: object
+      required: [id, name, owner_user_id, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        owner_user_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+
+    PaginatedDomains:
+      type: object
+      required: [items, total, page, limit]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Domain' } }
+        total: { type: integer }
+        page: { type: integer }
+        limit: { type: integer }
+
+    DatasetCreate:
+      type: object
+      required: [domain_id, name, classification, owner_user_id]
+      properties:
+        domain_id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        classification: { $ref: '#/components/schemas/Classification' }
+        owner_user_id: { type: string, format: uuid }
+        source_system: { type: string }
+
+    Dataset:
+      type: object
+      required: [id, domain_id, name, classification, status, owner_user_id, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        domain_id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        classification: { $ref: '#/components/schemas/Classification' }
+        status: { $ref: '#/components/schemas/DatasetStatus' }
+        owner_user_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        approval_required: { type: boolean }
+
+    DatasetDetail:
+      allOf:
+        - $ref: '#/components/schemas/Dataset'
+        - type: object
+          properties:
+            schema_definition: { type: object }
+            retention_policy_id: { type: string, format: uuid }
+            last_reviewed_at: { type: string, format: date-time }
+
+    PaginatedDatasets:
+      type: object
+      required: [items, total, page, limit]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Dataset' } }
+        total: { type: integer }
+        page: { type: integer }
+        limit: { type: integer }
+
+    ApprovalDecision:
+      type: object
+      properties:
+        decision: { type: string, enum: [approve, reject] }
+        comment: { type: string }
+
+    ApprovalActionResponse:
+      type: object
+      required: [status, dataset_id]
+      properties:
+        status: { type: string }
+        dataset_id: { type: string, format: uuid }
+        correlation_id: { type: string, format: uuid }
+
+    PipelineRun:
+      type: object
+      required: [run_id, pipeline_id, status, queued_at]
+      properties:
+        run_id: { type: string, format: uuid }
+        pipeline_id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, running, succeeded, failed, cancelled] }
+        queued_at: { type: string, format: date-time }
+
+    PipelineRunDetail:
+      allOf:
+        - $ref: '#/components/schemas/PipelineRun'
+        - type: object
+          properties:
+            started_at: { type: string, format: date-time }
+            ended_at: { type: string, format: date-time }
+            error_code: { type: string }
+            metrics: { type: object }
+
+    LineageGraph:
+      type: object
+      required: [nodes, edges]
+      properties:
+        nodes: { type: array, items: { type: object } }
+        edges: { type: array, items: { type: object } }
+
+    QualityResult:
+      type: object
+      required: [id, rule_id, status, checked_at]
+      properties:
+        id: { type: string, format: uuid }
+        rule_id: { type: string, format: uuid }
+        status: { type: string, enum: [passed, failed, skipped] }
+        metrics: { type: object }
+        checked_at: { type: string, format: date-time }
+
+    PaginatedQualityResults:
+      type: object
+      required: [items, total, page, limit]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/QualityResult' } }
+        total: { type: integer }
+        page: { type: integer }
+        limit: { type: integer }
+
+    AuditEvent:
+      type: object
+      required: [id, actor_subject, action, resource_type, outcome, occurred_at]
+      properties:
+        id: { type: string, format: uuid }
+        actor_subject: { type: string }
+        action: { type: string }
+        resource_type: { type: string }
+        resource_id: { type: string, format: uuid }
+        outcome: { type: string, enum: [success, failure] }
+        correlation_id: { type: string, format: uuid }
+        occurred_at: { type: string, format: date-time }
+        details: { type: object }
+
+    PaginatedAuditEvents:
+      type: object
+      required: [items, total, page, limit]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AuditEvent' } }
+        total: { type: integer }
+        page: { type: integer }
+        limit: { type: integer }
+
+    Evidence:
+      type: object
+      required: [id, evidence_type, owner_id, storage_ref, review_date]
+      properties:
+        id: { type: string, format: uuid }
+        evidence_type: { type: string }
+        owner_id: { type: string, format: uuid }
+        storage_ref: { type: string }
+        review_date: { type: string, format: date-time }
+        retention_until: { type: string, format: date-time }
+
+    PaginatedEvidence:
+      type: object
+      required: [items, total, page, limit]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Evidence' } }
+        total: { type: integer }
+        page: { type: integer }
+        limit: { type: integer }
